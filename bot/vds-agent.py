@@ -18,23 +18,25 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import uuid
 
-# Paths
-CONFIG = "/etc/socks-monitor/config.json"
-ADMIN_FILE = "/etc/socks-monitor/.admin_id"
-DB_FILE = "/var/lib/telegram-llm-bot.db"
-SESSIONS_ROOT = "/var/lib/vds-agent/sessions"
+# Paths (overridable via env)
+CONFIG = os.environ.get("BOT_CONFIG", "/etc/socks-monitor/config.json")
+ADMIN_FILE = os.environ.get("BOT_ADMIN_FILE", "/etc/socks-monitor/.admin_id")
+DB_FILE = os.environ.get("BOT_DB_FILE", "/var/lib/telegram-llm-bot.db")
+SESSIONS_ROOT = os.environ.get("BOT_SESSIONS_ROOT", "/var/lib/vds-agent/sessions")
 
-# Constants
-TUNNEL_URL = "https://ai.smolevich.com"
-MAX_CONTEXT_TOKENS = 64000
-REQUIRED_CHANNEL = "@naturalists_notes_st"
-PROXY_URL = "http://REDACTED-PROXY"
+# Constants (overridable via env)
+TUNNEL_URL = os.environ.get("BOT_TUNNEL_URL", "https://ai.smolevich.com")
+MAX_CONTEXT_TOKENS = int(os.environ.get("BOT_MAX_CONTEXT_TOKENS", "64000"))
+REQUIRED_CHANNEL = os.environ.get("BOT_REQUIRED_CHANNEL", "@naturalists_notes_st")
+PROXY_URL = os.environ.get("BOT_PROXY_URL", "")
 
 # Providers
+# API keys are resolved in order: env var -> key_file on disk
 PROVIDERS = {
     "openrouter": {
         "url": "https://openrouter.ai/api/v1/chat/completions",
         "models_url": "https://shir-man.com/api/free-llm/top-models",
+        "key_env": "OPENROUTER_API_KEY",
         "key_file": "/etc/socks-monitor/.openrouter_key",
         "default_model": "inclusionai/ling-2.6-1t:free",
         "supports_tools": True,
@@ -43,6 +45,7 @@ PROVIDERS = {
     "groq": {
         "url": "https://api.groq.com/openai/v1/chat/completions",
         "models_url": "https://api.groq.com/openai/v1/models",
+        "key_env": "GROQ_API_KEY",
         "key_file": "/etc/socks-monitor/.groq_key",
         "default_model": "llama-3.3-70b-versatile",
         "supports_tools": True,
@@ -51,6 +54,7 @@ PROVIDERS = {
     "cerebras": {
         "url": "https://api.cerebras.ai/v1/chat/completions",
         "models_url": "https://api.cerebras.ai/v1/models",
+        "key_env": "CEREBRAS_API_KEY",
         "key_file": "/etc/socks-monitor/.cerebras_key",
         "default_model": "llama-3.3-70b",
         "supports_tools": False,
@@ -59,6 +63,7 @@ PROVIDERS = {
     "nvidia": {
         "url": "https://integrate.api.nvidia.com/v1/chat/completions",
         "models_url": "https://integrate.api.nvidia.com/v1/models",
+        "key_env": "NVIDIA_API_KEY",
         "key_file": "/etc/socks-monitor/.nvidia_key",
         "default_model": "meta/llama-3.1-70b-instruct",
         "supports_tools": True,
@@ -134,8 +139,16 @@ def load_bot_token():
         log.error(f"Bot token error: {e}"); return ""
 
 def load_provider_key(provider_name):
+    prov = PROVIDERS.get(provider_name)
+    if not prov:
+        return ""
+    # 1. Try env var
+    env_key = os.environ.get(prov.get("key_env", ""), "").strip()
+    if env_key:
+        return env_key
+    # 2. Fallback to file on disk
     try:
-        return Path(PROVIDERS[provider_name]["key_file"]).read_text().strip()
+        return Path(prov["key_file"]).read_text().strip()
     except Exception:
         return ""
 
@@ -167,7 +180,7 @@ def fetch_models(provider_name):
         log.error(f"fetch_models({provider_name}): {e}"); return []
 
 def _make_opener(use_proxy):
-    if use_proxy:
+    if use_proxy and PROXY_URL:
         return urllib.request.build_opener(urllib.request.ProxyHandler({"https": PROXY_URL, "http": PROXY_URL}))
     return urllib.request.build_opener()
 
