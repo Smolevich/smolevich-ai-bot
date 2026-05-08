@@ -1,0 +1,35 @@
+name: Deploy to VDS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'bot/**'
+      - 'vds-agent.service'
+
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VDS_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          cat >> ~/.ssh/config <<EOF
+          Host vds
+            HostName ${{ secrets.VDS_HOST }}
+            Port ${{ secrets.VDS_PORT }}
+            User ${{ secrets.VDS_USER }}
+            IdentityFile ~/.ssh/id_deploy
+            StrictHostKeyChecking no
+          EOF
+
+      - name: Deploy bot
+        run: |
+          scp bot/vds-agent.py vds:/usr/local/bin/vds-agent
+          ssh vds "sudo systemctl restart vds-agent && sleep 1 && sudo systemctl is-active vds-agent"

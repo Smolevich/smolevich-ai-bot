@@ -1,0 +1,12 @@
+[Unit]
+Description=VDS Secure AI Agent
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/bin/vds-agent
+Restart=always
+User=root
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
