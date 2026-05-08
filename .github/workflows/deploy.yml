@@ -20,16 +20,19 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.VDS_SSH_KEY }}" > ~/.ssh/id_deploy
           chmod 600 ~/.ssh/id_deploy
+          eval "$(ssh-agent -s)"
+          echo "${{ secrets.VDS_SSH_PASSPHRASE }}" | SSH_ASKPASS_REQUIRE=force SSH_ASKPASS=/usr/bin/cat ssh-add ~/.ssh/id_deploy
           cat >> ~/.ssh/config <<EOF
           Host vds
             HostName ${{ secrets.VDS_HOST }}
             Port ${{ secrets.VDS_PORT }}
             User ${{ secrets.VDS_USER }}
-            IdentityFile ~/.ssh/id_deploy
             StrictHostKeyChecking no
           EOF
 
       - name: Deploy bot
         run: |
+          eval "$(ssh-agent -s)"
+          echo "${{ secrets.VDS_SSH_PASSPHRASE }}" | SSH_ASKPASS_REQUIRE=force SSH_ASKPASS=/usr/bin/cat ssh-add ~/.ssh/id_deploy
           scp bot/vds-agent.py vds:/usr/local/bin/vds-agent
           ssh vds "sudo systemctl restart vds-agent && sleep 1 && sudo systemctl is-active vds-agent"
