@@ -16,12 +16,23 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Setup SSH
+        env:
+          SSH_KEY: ${{ secrets.VDS_SSH_KEY }}
+          SSH_PASSPHRASE: ${{ secrets.VDS_SSH_PASSPHRASE }}
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.VDS_SSH_KEY }}" > ~/.ssh/id_deploy
+          echo "$SSH_KEY" > ~/.ssh/id_deploy
           chmod 600 ~/.ssh/id_deploy
+          cat > ~/.ssh/askpass.sh <<'SCRIPT'
+          #!/bin/sh
+          cat ~/.ssh/.passphrase
+          SCRIPT
+          chmod +x ~/.ssh/askpass.sh
+          echo "$SSH_PASSPHRASE" > ~/.ssh/.passphrase
+          chmod 600 ~/.ssh/.passphrase
           eval "$(ssh-agent -s)"
-          echo "${{ secrets.VDS_SSH_PASSPHRASE }}" | SSH_ASKPASS_REQUIRE=force SSH_ASKPASS=/usr/bin/cat ssh-add ~/.ssh/id_deploy
+          DISPLAY=:0 SSH_ASKPASS=~/.ssh/askpass.sh SSH_ASKPASS_REQUIRE=force ssh-add ~/.ssh/id_deploy
+          rm -f ~/.ssh/.passphrase
           cat >> ~/.ssh/config <<EOF
           Host vds
             HostName ${{ secrets.VDS_HOST }}
@@ -32,7 +43,5 @@ jobs:
 
       - name: Deploy bot
         run: |
-          eval "$(ssh-agent -s)"
-          echo "${{ secrets.VDS_SSH_PASSPHRASE }}" | SSH_ASKPASS_REQUIRE=force SSH_ASKPASS=/usr/bin/cat ssh-add ~/.ssh/id_deploy
           scp bot/vds-agent.py vds:/usr/local/bin/vds-agent
           ssh vds "sudo systemctl restart vds-agent && sleep 1 && sudo systemctl is-active vds-agent"
