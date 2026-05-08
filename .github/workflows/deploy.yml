@@ -17,10 +17,9 @@ jobs:
       - name: Stamp version
         run: |
           SHA=$(git rev-parse --short HEAD)
-          DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          sed -i "s|^__VERSION_SHA__ = \"dev\"|__VERSION_SHA__ = \"$SHA\"|" bot/vds-agent.py
-          sed -i "s|^__VERSION_DATE__ = \"local\"|__VERSION_DATE__ = \"$DATE\"|" bot/vds-agent.py
-          grep -E '^__VERSION_(SHA|DATE)__' bot/vds-agent.py
+          DATE=$(date -u +"%Y-%m-%d")
+          sed -i "s|^__VERSION__ = \"dev\"|__VERSION__ = \"$DATE-$SHA\"|" bot/vds-agent.py
+          grep -E '^__VERSION__' bot/vds-agent.py
 
       - name: Copy files to server
         uses: appleboy/scp-action@v0.1.7

@@ -30,9 +30,9 @@ MAX_CONTEXT_TOKENS = int(os.environ.get("BOT_MAX_CONTEXT_TOKENS", "64000"))
 REQUIRED_CHANNEL = os.environ.get("BOT_REQUIRED_CHANNEL", "@naturalists_notes_st")
 PROXY_URL = os.environ.get("BOT_PROXY_URL", "")
 
-# Version stamps — CI replaces these placeholders before deploy; manual deploys keep "dev".
-__VERSION_SHA__ = "dev"
-__VERSION_DATE__ = "local"
+# Version stamp — CI replaces this placeholder before deploy; manual deploys keep "dev".
+# Format: YYYY-MM-DD-<short_sha>
+__VERSION__ = "dev"
 
 # Providers
 # API keys are resolved in order: env var -> key_file on disk
@@ -1047,7 +1047,8 @@ def handle_command(uid, username, text, token, admin_id):
             f"• Tools: {'on' if sess.get('tools_enabled', True) else 'off'}\n"
             f"• Контекст: {ctx_tokens}/{MAX_CONTEXT_TOKENS} ({ctx_pct}%)\n"
             f"• Session UUID: {sid_line}\n"
-            f"• Активный запрос: {active}"
+            f"• Активный запрос: {active}\n"
+            f"• Версия: `{__VERSION__}`"
         )
         res = tg_send_text(token, uid, txt, parse_mode="Markdown")
         log.info(f"/status sendMessage result: ok={res.get('ok')} chat_id={uid} desc={(res.get('description') or '')[:200]}")
@@ -1095,7 +1096,7 @@ def handle_command(uid, username, text, token, admin_id):
             tg_request(token, "sendMessage", {"chat_id": admin_id, "text": f"📩 Feedback from {uname}: {fb}"})
             tg_request(token, "sendMessage", {"chat_id": uid, "text": "✅ Sent!"})
     elif text == "/version":
-        txt = f"🔖 Version: `{__VERSION_SHA__}`\n📅 Built: `{__VERSION_DATE__}`"
+        txt = f"🔖 Version: `{__VERSION__}`"
         tg_request(token, "sendMessage", {"chat_id": uid, "text": txt, "parse_mode": "Markdown"})
     elif text == "/users" and uid == admin_id:
         stats = DB.get_all_users_stats(); txt = "👥 *Users:*\n"
