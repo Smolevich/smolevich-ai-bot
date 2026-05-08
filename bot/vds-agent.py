@@ -1057,19 +1057,21 @@ def handle_command(uid, username, text, token, admin_id):
         with _INFLIGHT_LOCK:
             inflight = uid in _INFLIGHT_USERS
         active = "да" if (st.get("active") or inflight) else "нет"
-        session_uuid = st.get("active_session_id") or st.get("last_session_id") or sess.get("last_session_id")
-        if session_uuid:
-            sid_line = session_uuid
-        else:
-            sid_line = "нет (после перезапуска ещё не было ACP-запроса)"
+        mode = sess.get("engine_mode", "native")
+        # Session UUID is an ACP-mode concept; native talks to the LLM stateless-ly per turn.
+        session_uuid_line = ""
+        if mode in ("claude", "opencode", "pi"):
+            sid = st.get("active_session_id") or st.get("last_session_id") or sess.get("last_session_id")
+            sid_text = sid if sid else "нет (после перезапуска ещё не было ACP-запроса)"
+            session_uuid_line = f"• Session UUID: {sid_text}\n"
         txt = (
             "📌 Текущий статус\n"
             f"• Провайдер: `{sess['provider']}`\n"
             f"• Модель: `{sess['model']}`\n"
-            f"• Режим: `{sess.get('engine_mode', 'native')}`\n"
+            f"• Режим: `{mode}`\n"
             f"• Tools: {'on' if sess.get('tools_enabled', True) else 'off'}\n"
             f"• Контекст: {ctx_tokens}/{MAX_CONTEXT_TOKENS} ({ctx_pct}%)\n"
-            f"• Session UUID: {sid_line}\n"
+            f"{session_uuid_line}"
             f"• Активный запрос: {active}\n"
             f"• Версия: `{__VERSION__}`"
         )
@@ -1214,7 +1216,7 @@ def process_update(upd, token, admin_id):
             hist = compact_history(prov["url"], api_key, model, hist, uid, admin_id, use_proxy=use_proxy)
 
         role_desc = "You are an ADMIN with full internet access." if uid == admin_id else "You are a USER. Internet restricted."
-        sys_prompt = f"VDS Agent. Instructions: {role_desc} Environment: Alpine Linux. No 'requests' lib, use 'urllib.request', wget, curl. Use DuckDuckGo (html.duckduckgo.com) if Google fails. Format: Markdown. Be concise — show actual command output, no hypothetical examples, no tables with status, no 'next steps' sections. Just execute and show results. When user sends coordinates [Геолокация: lat, lon], use them for location-based queries (search nearby places, weather, etc.). Always complete your answer fully — never cut off mid-sentence."
+        sys_prompt = f"VDS Agent. Instructions: {role_desc} Environment: Alpine Linux. No 'requests' lib, use 'urllib.request', wget, curl. Use DuckDuckGo (html.duckduckgo.com) if Google fails. Output: plain text only — no markdown, no asterisks for bold/italic, no triple backticks for code blocks. Use line breaks and bullets (- or •) to structure. Be concise — show actual command output, no hypothetical examples, no tables with status, no 'next steps' sections. Just execute and show results. When user sends coordinates [Геолокация: lat, lon], use them for location-based queries (search nearby places, weather, etc.). Always complete your answer fully — never cut off mid-sentence."
 
         mode = sess.get("engine_mode", "native")
         if mode in ("claude", "opencode", "pi"):
