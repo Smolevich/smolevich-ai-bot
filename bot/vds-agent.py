@@ -461,6 +461,20 @@ class DB:
             log.error(f"DB get_healthy_models: {e}")
             return []
     @staticmethod
+    def get_recent_models(provider, max_age_sec=600, category="text", limit=12):
+        try:
+            cutoff = int(time.time()) - max_age_sec
+            with DB._connect() as conn:
+                rows = conn.execute(
+                    "SELECT model_id, latency_ms, available, supports_tools FROM model_health "
+                    "WHERE provider = ? AND category = ? AND last_check >= ? "
+                    "ORDER BY available DESC, latency_ms ASC LIMIT ?",
+                    (provider, category, cutoff, limit)).fetchall()
+                return [{"id": r[0], "latency_ms": r[1] or 0, "available": r[2] == 1, "supportsTools": r[3] == 1} for r in rows]
+        except Exception as e:
+            log.error(f"DB get_recent_models: {e}")
+            return []
+    @staticmethod
     def get_model_info(provider, model_id):
         try:
             with DB._connect() as conn:
@@ -1011,20 +1025,13 @@ def handle_command(uid, username, text, token, admin_id):
     elif text == "/models":
         sess = DB.get_session(uid)
         prov = sess["provider"]
-        # Source of truth: whatever the provider says is currently in its top list. Enrich with DB status.
-        fresh = fetch_models(prov)[:12]
-        ms = []
-        for m in fresh:
-            mid = m["id"]
-            info = DB.get_model_info(prov, mid) or {}
-            ms.append({
-                "id": mid,
-                "latency_ms": info.get("latency_ms") or 0,
-                "available": info.get("available", True),
-                "supportsTools": bool(m.get("supportsTools") or info.get("supports_tools")),
-            })
+        # Cron writes one row per current-top-list model every 5 minutes; treat anything touched
+        # within the last 10 minutes as "currently in the top list", regardless of availability.
+        # That gives us all-six visibility without paying the cost of a live endpoint fetch each call.
+        ms = DB.get_recent_models(prov, max_age_sec=600, limit=12)
         if not ms:
-            ms = DB.get_healthy_models(prov, limit=12)
+            fresh = fetch_models(prov)[:12]
+            ms = [{"id": m["id"], "latency_ms": 0, "available": True, "supportsTools": bool(m.get("supportsTools"))} for m in fresh]
         kb = []
         for m in ms[:12]:
             mid = m["id"]
