@@ -2,6 +2,7 @@
 """Model health checker — runs via cron, tests LLM provider models and writes results to SQLite."""
 import json
 import logging
+import os
 import urllib.request
 import urllib.error
 import sqlite3
@@ -12,7 +13,20 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 DB_FILE = "/var/lib/telegram-llm-bot.db"
-PROXY_URL = "http://REDACTED-PROXY"
+PROXY_FILE = "/etc/socks-monitor/.proxy_url"
+
+
+def _resolve_proxy():
+    val = os.environ.get("BOT_PROXY_URL", "")
+    if val:
+        return val
+    try:
+        return Path(PROXY_FILE).read_text().strip()
+    except Exception:
+        return ""
+
+
+PROXY_URL = _resolve_proxy()
 
 HEALTH_CHECK_PROMPT = "Ответь одним словом: столица Франции?"
 HEALTH_CHECK_MAX_TOKENS = 10

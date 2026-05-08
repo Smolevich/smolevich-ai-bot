@@ -6,7 +6,11 @@ PROVIDER="openrouter"
 TASK=""
 MODEL=""
 WORKDIR="/var/lib/vds-agent/sessions"
-PROXY_URL="http://REDACTED-PROXY"
+PROXY_FILE="/etc/socks-monitor/.proxy_url"
+PROXY_URL="${BOT_PROXY_URL:-}"
+if [[ -z "$PROXY_URL" && -f "$PROXY_FILE" ]]; then
+  PROXY_URL="$(cat "$PROXY_FILE")"
+fi
 OPENROUTER_KEY_FILE="/etc/socks-monitor/.openrouter_key"
 
 while [[ $# -gt 0 ]]; do

@@ -256,8 +256,7 @@ def set_bot_commands(token):
     commands = [
         {"command": "provider", "description": "Select provider"},
         {"command": "models", "description": "Select model"},
-        {"command": "stats", "description": "Top models/providers stats"},
-        {"command": "top", "description": "Top 3 models by delivered answers"},
+        {"command": "top", "description": "Top 3 models/providers by delivered answers"},
         {"command": "status", "description": "Show current session status"},
         {"command": "mode", "description": "Engine mode: native/claude/opencode/pi"},
         {"command": "tools", "description": "Tools mode: on/off/status"},
@@ -1012,15 +1011,32 @@ def handle_command(uid, username, text, token, admin_id):
     elif text == "/models":
         sess = DB.get_session(uid)
         prov = sess["provider"]
-        ms = DB.get_healthy_models(prov, limit=12)
+        # Source of truth: whatever the provider says is currently in its top list. Enrich with DB status.
+        fresh = fetch_models(prov)[:12]
+        ms = []
+        for m in fresh:
+            mid = m["id"]
+            info = DB.get_model_info(prov, mid) or {}
+            ms.append({
+                "id": mid,
+                "latency_ms": info.get("latency_ms") or 0,
+                "available": info.get("available", True),
+                "supportsTools": bool(m.get("supportsTools") or info.get("supports_tools")),
+            })
         if not ms:
-            ms = fetch_models(prov)[:12]
+            ms = DB.get_healthy_models(prov, limit=12)
         kb = []
         for m in ms[:12]:
             mid = m["id"]
-            latency = m.get("latency_ms")
+            latency = m.get("latency_ms") or 0
+            available = m.get("available", True)
             tools_icon = "🛠" if m.get("supportsTools") else ""
-            status_icon = "🟢" if latency else ""
+            if available and latency:
+                status_icon = "🟢"
+            elif available:
+                status_icon = "⚪"
+            else:
+                status_icon = "🔴"
             latency_tag = f" {latency}ms" if latency else ""
             label = mid.split("/")[-1] if "/" in mid else mid
             kb.append([{"text": f"{status_icon}{tools_icon} {label}{latency_tag}", "callback_data": f"set_model:{mid}"}])
@@ -1052,7 +1068,7 @@ def handle_command(uid, username, text, token, admin_id):
         )
         res = tg_send_text(token, uid, txt, parse_mode="Markdown")
         log.info(f"/status sendMessage result: ok={res.get('ok')} chat_id={uid} desc={(res.get('description') or '')[:200]}")
-    elif text in ("/top", "/stats"):
+    elif text == "/top":
         tg_send_text(token, uid, build_top_text(), parse_mode="Markdown")
     elif text.startswith("/model"):
         parts = text.split(maxsplit=1)

@@ -35,12 +35,15 @@ jobs:
 
       - name: Install, migrate, restart
         uses: appleboy/ssh-action@v1.2.2
+        env:
+          BOT_PROXY_URL: ${{ secrets.BOT_PROXY_URL }}
         with:
           host: ${{ secrets.VDS_HOST }}
           port: ${{ secrets.VDS_PORT }}
           username: ${{ secrets.VDS_USER }}
           key: ${{ secrets.VDS_SSH_KEY }}
           passphrase: ${{ secrets.VDS_SSH_PASSPHRASE }}
+          envs: BOT_PROXY_URL
           script: |
             set -e
             sudo install -m 0755 /tmp/deploy-bot/vds-agent.py          /usr/local/bin/vds-agent
@@ -50,6 +53,10 @@ jobs:
             sudo mkdir -p /usr/local/bin/migrations
             sudo cp /tmp/deploy-bot/migrations/*.py /usr/local/bin/migrations/
             rm -rf /tmp/deploy-bot
+            if [ -n "$BOT_PROXY_URL" ]; then
+              echo "$BOT_PROXY_URL" | sudo tee /etc/socks-monitor/.proxy_url >/dev/null
+              sudo chmod 600 /etc/socks-monitor/.proxy_url
+            fi
             sudo systemctl daemon-reload
             sudo /usr/local/bin/migrate_bot_db
             sudo systemctl restart vds-agent
