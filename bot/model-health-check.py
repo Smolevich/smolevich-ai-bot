@@ -3,6 +3,7 @@
 import json
 import logging
 import urllib.request
+import urllib.error
 import sqlite3
 import sys
 import time
@@ -114,11 +115,28 @@ def fetch_models(provider_name):
         return models
 
 
+def _carry_or_set_availability(conn, prov_name, model_id, fresh_available, rate_limited):
+    """Decide what to write to model_health.available.
+
+    On rate-limit, keep whatever was there before — temporary 429 from a shared key isn't a real
+    'model is unavailable' signal. On any other outcome, write the fresh result. New models default
+    to 1 on rate-limit so they don't get hidden on first encounter."""
+    if not rate_limited:
+        return 1 if fresh_available else 0
+    row = conn.execute(
+        "SELECT available FROM model_health WHERE provider = ? AND model_id = ?",
+        (prov_name, model_id)).fetchone()
+    return row[0] if row is not None else 1
+
+
 def check_model(prov_name, prov, api_key, model_id):
-    """Check a single model. Returns (model_id, latency_ms, available, supports_tools, category, error)."""
+    """Check a single model. Returns (model_id, latency_ms, available, supports_tools, category, error, rate_limited).
+
+    rate_limited=True means the probe hit HTTP 429 and the model's `available` flag should be left as it was —
+    a temporary key-quota exhaustion is not the same as the model being broken."""
     category = categorize_model(model_id)
     if category not in ("text", "code"):
-        return (model_id, 0, False, prov.get("supports_tools", False), category, None)
+        return (model_id, 0, False, prov.get("supports_tools", False), category, None, False)
     try:
         opener = make_opener(prov.get("proxy", False))
         timeout = prov.get("health_timeout", HEALTH_CHECK_TIMEOUT)
@@ -135,11 +153,16 @@ def check_model(prov_name, prov, api_key, model_id):
             json.loads(f.read().decode())
             latency = int((time.time() - start) * 1000)
             log.info(f"  ✅ {model_id}: {latency}ms")
-            return (model_id, latency, True, prov.get("supports_tools", False), category, None)
+            return (model_id, latency, True, prov.get("supports_tools", False), category, None, False)
+    except urllib.error.HTTPError as e:
+        err = f"HTTP Error {e.code}: {e.reason}"
+        rate_limited = (e.code == 429)
+        log.info(f"  {'⏸' if rate_limited else '❌'} {model_id}: {err}")
+        return (model_id, 0, False, False, category, err, rate_limited)
     except Exception as e:
         err = str(e)[:200]
         log.info(f"  ❌ {model_id}: {e}")
-        return (model_id, 0, False, False, category, err)
+        return (model_id, 0, False, False, category, err, False)
 
 
 def fetch_openrouter_model_list(prov):
@@ -178,27 +201,30 @@ def check_provider(conn, prov_name, openrouter_delay_sec=OPENROUTER_DELAY_SEC):
         # Override supports_tools per model from shir-man metadata.
         prov_copy = dict(prov)
 
-        ok, fail = 0, 0
+        ok, fail, throttled = 0, 0, 0
         log.info(f"Checking {prov_name}: {len(models)} models (sequential, delay={openrouter_delay_sec}s)")
         now = int(time.time())
         for i, mid in enumerate(models):
-            model_id, latency, available, _, category, error = check_model(prov_name, prov_copy, api_key, mid)
+            model_id, latency, available, _, category, error, rate_limited = check_model(prov_name, prov_copy, api_key, mid)
             supports_tools = tools_map.get(model_id, prov.get("supports_tools", False))
+            effective_available = _carry_or_set_availability(conn, prov_name, model_id, available, rate_limited)
             conn.execute(
                 "INSERT OR REPLACE INTO model_health (provider, model_id, latency_ms, available, supports_tools, category, last_check) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (prov_name, model_id, latency, 1 if available else 0,
+                (prov_name, model_id, latency, effective_available,
                  1 if supports_tools else 0, category, now))
             conn.execute(
                 "INSERT INTO model_health_log (ts, provider, model_id, latency_ms, available, error) VALUES (?, ?, ?, ?, ?, ?)",
                 (now, prov_name, model_id, latency, 1 if available else 0, error))
-            if available:
+            if rate_limited:
+                throttled += 1
+            elif available:
                 ok += 1
             elif category in ("text", "code"):
                 fail += 1
             if i < len(models) - 1 and openrouter_delay_sec > 0:
                 time.sleep(openrouter_delay_sec)
         conn.commit()
-        log.info(f"{prov_name}: {ok} ok, {fail} failed")
+        log.info(f"{prov_name}: {ok} ok, {fail} failed, {throttled} rate-limited (kept prior state)")
         return
 
     prov = PROVIDERS[prov_name]
@@ -217,25 +243,29 @@ def check_provider(conn, prov_name, openrouter_delay_sec=OPENROUTER_DELAY_SEC):
     log.info(f"Checking {prov_name}: {len(models)} models ({WORKERS} workers)")
 
     now = int(time.time())
+    throttled = 0
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         futures = {pool.submit(check_model, prov_name, prov, api_key, mid): mid for mid in models}
         for future in as_completed(futures):
-            model_id, latency, available, supports_tools, category, error = future.result()
+            model_id, latency, available, supports_tools, category, error, rate_limited = future.result()
+            effective_available = _carry_or_set_availability(conn, prov_name, model_id, available, rate_limited)
             conn.execute(
                 "INSERT OR REPLACE INTO model_health (provider, model_id, latency_ms, available, supports_tools, category, last_check) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (prov_name, model_id, latency, 1 if available else 0,
+                (prov_name, model_id, latency, effective_available,
                  1 if supports_tools else 0, category, now))
             if category in ("text", "code"):
                 conn.execute(
                     "INSERT INTO model_health_log (ts, provider, model_id, latency_ms, available, error) VALUES (?, ?, ?, ?, ?, ?)",
                     (now, prov_name, model_id, latency, 1 if available else 0, error))
-            if available:
+            if rate_limited:
+                throttled += 1
+            elif available:
                 ok += 1
             elif category in ("text", "code"):
                 fail += 1
 
     conn.commit()
-    log.info(f"{prov_name}: {ok} ok, {fail} failed")
+    log.info(f"{prov_name}: {ok} ok, {fail} failed, {throttled} rate-limited (kept prior state)")
 
 
 def main():
