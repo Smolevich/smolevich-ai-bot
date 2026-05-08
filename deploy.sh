@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Manual deploy: ./deploy.sh
-# Copies bot to VDS and restarts the service.
+# Updates only the bot binary. Use the GitHub Actions workflow
+# (push to main) to also ship migrations, the migrate runner,
+# the health-check script, and the systemd unit.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

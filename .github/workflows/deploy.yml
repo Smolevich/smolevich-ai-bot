@@ -5,7 +5,6 @@ on:
     branches: [main]
     paths:
       - 'bot/**'
-      - 'vds-agent.service'
 
   workflow_dispatch:
 
@@ -15,7 +14,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Copy bot to server
+      - name: Stamp version
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          sed -i "s|^__VERSION_SHA__ = \"dev\"|__VERSION_SHA__ = \"$SHA\"|" bot/vds-agent.py
+          sed -i "s|^__VERSION_DATE__ = \"local\"|__VERSION_DATE__ = \"$DATE\"|" bot/vds-agent.py
+          grep -E '^__VERSION_(SHA|DATE)__' bot/vds-agent.py
+
+      - name: Copy files to server
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.VDS_HOST }}
@@ -23,11 +30,11 @@ jobs:
           username: ${{ secrets.VDS_USER }}
           key: ${{ secrets.VDS_SSH_KEY }}
           passphrase: ${{ secrets.VDS_SSH_PASSPHRASE }}
-          source: bot/vds-agent.py
+          source: bot/vds-agent.py,bot/migrate.py,bot/model-health-check.py,bot/vds-agent.service,bot/migrations
           target: /tmp/deploy-bot
           strip_components: 1
 
-      - name: Install and restart
+      - name: Install, migrate, restart
         uses: appleboy/ssh-action@v1.2.2
         with:
           host: ${{ secrets.VDS_HOST }}
@@ -36,8 +43,16 @@ jobs:
           key: ${{ secrets.VDS_SSH_KEY }}
           passphrase: ${{ secrets.VDS_SSH_PASSPHRASE }}
           script: |
-            sudo cp /tmp/deploy-bot/vds-agent.py /usr/local/bin/vds-agent
+            set -e
+            sudo install -m 0755 /tmp/deploy-bot/vds-agent.py          /usr/local/bin/vds-agent
+            sudo install -m 0755 /tmp/deploy-bot/migrate.py            /usr/local/bin/migrate_bot_db
+            sudo install -m 0755 /tmp/deploy-bot/model-health-check.py /usr/local/bin/model-health-check
+            sudo install -m 0644 /tmp/deploy-bot/vds-agent.service     /etc/systemd/system/vds-agent.service
+            sudo mkdir -p /usr/local/bin/migrations
+            sudo cp /tmp/deploy-bot/migrations/*.py /usr/local/bin/migrations/
             rm -rf /tmp/deploy-bot
+            sudo systemctl daemon-reload
+            sudo /usr/local/bin/migrate_bot_db
             sudo systemctl restart vds-agent
             sleep 1
             sudo systemctl is-active vds-agent

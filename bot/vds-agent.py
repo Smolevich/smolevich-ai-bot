@@ -30,6 +30,10 @@ MAX_CONTEXT_TOKENS = int(os.environ.get("BOT_MAX_CONTEXT_TOKENS", "64000"))
 REQUIRED_CHANNEL = os.environ.get("BOT_REQUIRED_CHANNEL", "@naturalists_notes_st")
 PROXY_URL = os.environ.get("BOT_PROXY_URL", "")
 
+# Version stamps — CI replaces these placeholders before deploy; manual deploys keep "dev".
+__VERSION_SHA__ = "dev"
+__VERSION_DATE__ = "local"
+
 # Providers
 # API keys are resolved in order: env var -> key_file on disk
 PROVIDERS = {
@@ -260,6 +264,7 @@ def set_bot_commands(token):
         {"command": "model", "description": "Set model manually"},
         {"command": "reset", "description": "Reset chat history"},
         {"command": "feedback", "description": "Send feedback to admin"},
+        {"command": "version", "description": "Show bot version (commit SHA + build date)"},
     ]
 
     # Telegram command menu may be scoped and language-specific.
@@ -1089,6 +1094,9 @@ def handle_command(uid, username, text, token, admin_id):
             fb = parts[1].strip(); uname = f"@{username}" if username else f"ID: {uid}"
             tg_request(token, "sendMessage", {"chat_id": admin_id, "text": f"📩 Feedback from {uname}: {fb}"})
             tg_request(token, "sendMessage", {"chat_id": uid, "text": "✅ Sent!"})
+    elif text == "/version":
+        txt = f"🔖 Version: `{__VERSION_SHA__}`\n📅 Built: `{__VERSION_DATE__}`"
+        tg_request(token, "sendMessage", {"chat_id": uid, "text": txt, "parse_mode": "Markdown"})
     elif text == "/users" and uid == admin_id:
         stats = DB.get_all_users_stats(); txt = "👥 *Users:*\n"
         for s in stats:
