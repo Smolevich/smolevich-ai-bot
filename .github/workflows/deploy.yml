@@ -15,33 +15,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Deploy bot
-        env:
-          SSH_KEY: ${{ secrets.VDS_SSH_KEY }}
-          SSH_PASSPHRASE: ${{ secrets.VDS_SSH_PASSPHRASE }}
-        run: |
-          mkdir -p ~/.ssh
-          echo "$SSH_KEY" > ~/.ssh/id_deploy
-          chmod 600 ~/.ssh/id_deploy
+      - name: Copy bot to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VDS_HOST }}
+          port: ${{ secrets.VDS_PORT }}
+          username: ${{ secrets.VDS_USER }}
+          key: ${{ secrets.VDS_SSH_KEY }}
+          passphrase: ${{ secrets.VDS_SSH_PASSPHRASE }}
+          source: bot/vds-agent.py
+          target: /tmp/deploy-bot
+          strip_components: 1
 
-          # askpass script to feed passphrase non-interactively
-          echo '#!/bin/sh' > ~/.ssh/askpass.sh
-          echo 'cat ~/.ssh/.pp' >> ~/.ssh/askpass.sh
-          chmod +x ~/.ssh/askpass.sh
-          echo "$SSH_PASSPHRASE" > ~/.ssh/.pp
-          chmod 600 ~/.ssh/.pp
-
-          eval "$(ssh-agent -s)"
-          DISPLAY=:0 SSH_ASKPASS=~/.ssh/askpass.sh SSH_ASKPASS_REQUIRE=force ssh-add ~/.ssh/id_deploy
-          rm -f ~/.ssh/.pp ~/.ssh/askpass.sh
-
-          cat >> ~/.ssh/config <<EOF
-          Host vds
-            HostName ${{ secrets.VDS_HOST }}
-            Port ${{ secrets.VDS_PORT }}
-            User ${{ secrets.VDS_USER }}
-            StrictHostKeyChecking no
-          EOF
-
-          scp bot/vds-agent.py vds:/usr/local/bin/vds-agent
-          ssh vds "sudo systemctl restart vds-agent && sleep 1 && sudo systemctl is-active vds-agent"
+      - name: Install and restart
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.VDS_HOST }}
+          port: ${{ secrets.VDS_PORT }}
+          username: ${{ secrets.VDS_USER }}
+          key: ${{ secrets.VDS_SSH_KEY }}
+          passphrase: ${{ secrets.VDS_SSH_PASSPHRASE }}
+          script: |
+            sudo cp /tmp/deploy-bot/vds-agent.py /usr/local/bin/vds-agent
+            rm -rf /tmp/deploy-bot
+            sudo systemctl restart vds-agent
+            sleep 1
+            sudo systemctl is-active vds-agent
