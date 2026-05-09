@@ -713,6 +713,7 @@ def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tool
     }
     retry_use_tools = use_tools
     groq_edge_retry_done = False
+    tool_validation_retry_done = False
     for attempt in range(10):
         payload = {"model": model, "messages": messages, "max_tokens": 4096}
         if retry_use_tools: payload.update({"tools": TOOLS, "tool_choice": "auto"})
@@ -810,6 +811,11 @@ def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tool
                     wait_info = f" (Retry in {format_wait_time(max(0, v))})"
                 except: wait_info = f" ({val})"
                 return f"❌ Rate limit reached{wait_info}.", usage, meta
+            if e.code == 400 and "tool_use_failed" in err_body and not tool_validation_retry_done:
+                tool_validation_retry_done = True
+                retry_use_tools = False
+                log.warning(f"Tool validation failed for model={model}; retrying with tools disabled.")
+                continue
             if e.code == 403 and "error code: 1010" in err_body.lower() and not groq_edge_retry_done:
                 groq_edge_retry_done = True
                 messages = compact_messages_for_provider(messages, keep_recent=8)
