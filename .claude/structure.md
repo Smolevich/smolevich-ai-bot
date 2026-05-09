@@ -3,6 +3,7 @@
 Everything bot-related lives in `bot/`:
 
 - `bot/vds-agent.py` — the bot itself (~1250+ lines): Telegram long-poll/webhook, SQLite, providers (OpenRouter / Groq / Cerebras / NVIDIA), Podman sessions, STT/TTS handlers.
+- `bot/agent/` — shared typed modules used by runtime (`config.py`, `text.py`).
 - `bot/vds-agent.service` — systemd unit, runs `/usr/bin/python3 /usr/local/bin/vds-agent` as root.
 - `bot/migrate.py` — yoyo migration runner (deploys to server as `migrate_bot_db`).
 - `bot/model-health-check.py` — text/code model health cron job, writes provider/model availability into the bot DB.

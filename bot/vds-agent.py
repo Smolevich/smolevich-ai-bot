@@ -12,70 +12,33 @@ import shutil
 import subprocess
 import urllib.error
 import shlex
-import re
 from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import uuid
-
-# Paths (overridable via env)
-CONFIG = os.environ.get("BOT_CONFIG", "/etc/socks-monitor/config.json")
-ADMIN_FILE = os.environ.get("BOT_ADMIN_FILE", "/etc/socks-monitor/.admin_id")
-DB_FILE = os.environ.get("BOT_DB_FILE", "/var/lib/telegram-llm-bot.db")
-SESSIONS_ROOT = os.environ.get("BOT_SESSIONS_ROOT", "/var/lib/vds-agent/sessions")
-
-# Constants (overridable via env)
-TUNNEL_URL = os.environ.get("BOT_TUNNEL_URL", "https://ai.smolevich.com")
-MAX_CONTEXT_TOKENS = int(os.environ.get("BOT_MAX_CONTEXT_TOKENS", "64000"))
-REQUIRED_CHANNEL = os.environ.get("BOT_REQUIRED_CHANNEL", "@naturalists_notes_st")
-PROXY_URL = os.environ.get("BOT_PROXY_URL", "")
+from agent.config import (
+    ADMIN_FILE,
+    CONFIG,
+    DB_FILE,
+    MAX_CONTEXT_TOKENS,
+    PROVIDERS,
+    PROVIDER_DEFAULT,
+    PROXY_URL,
+    REQUIRED_CHANNEL,
+    SESSIONS_ROOT,
+    TUNNEL_URL,
+)
+from agent.text import (
+    compact_messages_for_provider,
+    estimate_tokens,
+    sanitize_model_id,
+    split_telegram_text,
+    to_telegram_markdown,
+)
 
 # Version stamp — CI replaces this placeholder before deploy; manual deploys keep "dev".
 # Format: YYYY-MM-DD-<short_sha>
 __VERSION__ = "dev"
-
-# Providers
-# API keys are resolved in order: env var -> key_file on disk
-PROVIDERS = {
-    "openrouter": {
-        "url": "https://openrouter.ai/api/v1/chat/completions",
-        "models_url": "https://shir-man.com/api/free-llm/top-models",
-        "key_env": "OPENROUTER_API_KEY",
-        "key_file": "/etc/socks-monitor/.openrouter_key",
-        "default_model": "inclusionai/ling-2.6-1t:free",
-        "supports_tools": True,
-        "proxy": False,
-    },
-    "groq": {
-        "url": "https://api.groq.com/openai/v1/chat/completions",
-        "models_url": "https://api.groq.com/openai/v1/models",
-        "key_env": "GROQ_API_KEY",
-        "key_file": "/etc/socks-monitor/.groq_key",
-        "default_model": "llama-3.3-70b-versatile",
-        "supports_tools": True,
-        "proxy": True,
-    },
-    "cerebras": {
-        "url": "https://api.cerebras.ai/v1/chat/completions",
-        "models_url": "https://api.cerebras.ai/v1/models",
-        "key_env": "CEREBRAS_API_KEY",
-        "key_file": "/etc/socks-monitor/.cerebras_key",
-        "default_model": "llama-3.3-70b",
-        "supports_tools": False,
-        "proxy": True,
-    },
-    "nvidia": {
-        "url": "https://integrate.api.nvidia.com/v1/chat/completions",
-        "models_url": "https://integrate.api.nvidia.com/v1/models",
-        "key_env": "NVIDIA_API_KEY",
-        "key_file": "/etc/socks-monitor/.nvidia_key",
-        "default_model": "meta/llama-3.1-70b-instruct",
-        "supports_tools": True,
-        "proxy": False,
-    },
-}
-PROVIDER_DEFAULT = "openrouter"
-
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", handlers=[logging.StreamHandler(sys.stdout)])
 log = logging.getLogger(__name__)
@@ -125,29 +88,6 @@ TOOLS = [
 TOOL_HANDLERS = {"get_weather": lambda a: tool_get_weather(a["city"]), "get_exchange_rate": lambda a: tool_get_exchange_rate(a["from_currency"], a["to_currency"], a.get("amount", 1))}
 
 # --- Helpers ---
-def estimate_tokens(messages):
-    text = "".join([m.get("content", "") or "" for m in messages]); return len(text) // 4
-
-def compact_messages_for_provider(messages, keep_recent=8):
-    if not messages:
-        return []
-    system = []
-    non_system = []
-    for m in messages:
-        if m.get("role") == "system":
-            system.append(m)
-        else:
-            non_system.append(m)
-    return system + non_system[-keep_recent:]
-
-_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
-
-def sanitize_model_id(model):
-    m = str(model or "")
-    # Remove ANSI sequences and control chars that can break CLI args.
-    m = _ANSI_RE.sub("", m)
-    m = "".join(ch for ch in m if ch.isprintable())
-    return m.strip()
 
 def load_bot_token():
     try:
@@ -232,81 +172,6 @@ def tg_send_text(token, chat_id, text, parse_mode=None, reply_markup=None):
         payload.pop("parse_mode", None)
         return tg_request(token, "sendMessage", payload)
     return res
-
-def to_telegram_markdown(text):
-    """Best-effort conversion of GitHub-flavored markdown to Telegram Markdown V1.
-
-    Telegram V1 has *bold*, _italic_, `code`, ```code blocks```, [text](url) and
-    nothing else — no double-asterisk bold, no headers, no lists. Models almost
-    always emit **bold**, so we collapse it to *bold* outside code spans/blocks.
-    Also strip leading '# ' / '## ' style headers, replacing the line with bolded
-    text. Anything we can't safely convert is left alone — Telegram falls back to
-    plain text if a parse error happens (see tg_send_text)."""
-    if not text:
-        return text
-    out = []
-    i = 0
-    n = len(text)
-    while i < n:
-        # ```fenced code block``` — copy verbatim
-        if text.startswith("```", i):
-            end = text.find("```", i + 3)
-            if end == -1:
-                out.append(text[i:])
-                break
-            out.append(text[i:end + 3])
-            i = end + 3
-            continue
-        # `inline code` — copy verbatim
-        if text[i] == "`":
-            end = text.find("`", i + 1)
-            if end == -1:
-                out.append(text[i])
-                i += 1
-                continue
-            out.append(text[i:end + 1])
-            i = end + 1
-            continue
-        # Markdown header at line start: turn '# Foo' into '*Foo*'
-        if text[i] == "#" and (i == 0 or text[i - 1] == "\n"):
-            j = i
-            while j < n and text[j] == "#":
-                j += 1
-            if j < n and text[j] == " ":
-                line_end = text.find("\n", j)
-                if line_end == -1:
-                    line_end = n
-                line = text[j + 1:line_end].strip()
-                out.append("*" + line + "*")
-                i = line_end
-                continue
-        # **bold** -> *bold*
-        if text.startswith("**", i):
-            out.append("*")
-            i += 2
-            continue
-        out.append(text[i])
-        i += 1
-    return "".join(out)
-
-
-def split_telegram_text(text, max_len=3500):
-    text = text or ""
-    if len(text) <= max_len:
-        return [text]
-    parts = []
-    buf = text
-    while len(buf) > max_len:
-        cut = buf.rfind("\n", 0, max_len)
-        if cut < int(max_len * 0.5):
-            cut = buf.rfind(" ", 0, max_len)
-        if cut < int(max_len * 0.5):
-            cut = max_len
-        parts.append(buf[:cut].rstrip())
-        buf = buf[cut:].lstrip()
-    if buf:
-        parts.append(buf)
-    return parts
 
 def categorize_model_local(model_id):
     mid = (model_id or "").lower()
