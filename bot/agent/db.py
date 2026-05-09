@@ -299,13 +299,7 @@ class DB:
                     SELECT
                         provider,
                         model,
-                        SUM(
-                            CASE
-                                WHEN COALESCE(error, '') = ''
-                                 AND COALESCE(finish_reason, '') NOT IN ('acpx_error', 'acpx_timeout', 'acpx_exception')
-                                THEN 1 ELSE 0
-                            END
-                        ) AS delivered_answers,
+                        SUM(CASE WHEN delivered = 1 THEN 1 ELSE 0 END) AS delivered_answers,
                         COUNT(*) AS total_requests
                     FROM request_log
                     GROUP BY provider, model
@@ -339,13 +333,7 @@ class DB:
                     """
                     SELECT
                         provider,
-                        SUM(
-                            CASE
-                                WHEN COALESCE(error, '') = ''
-                                 AND COALESCE(finish_reason, '') NOT IN ('acpx_error', 'acpx_timeout', 'acpx_exception')
-                                THEN 1 ELSE 0
-                            END
-                        ) AS delivered_answers,
+                        SUM(CASE WHEN delivered = 1 THEN 1 ELSE 0 END) AS delivered_answers,
                         COUNT(*) AS total_requests
                     FROM request_log
                     GROUP BY provider
@@ -383,4 +371,3 @@ class DB:
             DB.withRetry(op, "set_last_session_id")
         except Exception as e:
             log.error(f"DB set_last_session_id: {e}")
-
