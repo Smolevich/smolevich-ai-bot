@@ -9,8 +9,6 @@ import sqlite3
 import sys
 import time
 import argparse
-import io
-import wave
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -130,91 +128,6 @@ def fetch_models(provider_name):
                 models.append(mid)
         return models
 
-def _multipart_body(fields, files):
-    boundary = "----HealthBoundary" + str(int(time.time() * 1000))
-    out = bytearray()
-    for name, value in fields.items():
-        out.extend(f"--{boundary}\r\n".encode())
-        out.extend(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode())
-        out.extend(str(value).encode())
-        out.extend(b"\r\n")
-    for f in files:
-        out.extend(f"--{boundary}\r\n".encode())
-        out.extend(f'Content-Disposition: form-data; name="{f["name"]}"; filename="{f["filename"]}"\r\n'.encode())
-        out.extend(f'Content-Type: {f.get("content_type", "application/octet-stream")}\r\n\r\n'.encode())
-        out.extend(f["content"])
-        out.extend(b"\r\n")
-    out.extend(f"--{boundary}--\r\n".encode())
-    return boundary, bytes(out)
-
-def _tiny_wav_bytes():
-    buf = io.BytesIO()
-    with wave.open(buf, "wb") as w:
-        w.setnchannels(1)
-        w.setsampwidth(2)
-        w.setframerate(16000)
-        w.writeframes(b"\x00\x00" * 1600)  # 0.1s silence
-    return buf.getvalue()
-
-def _check_audio_model(prov_name, prov, api_key, model_id):
-    if prov_name != "groq":
-        return (model_id, 0, False, prov.get("supports_tools", False), "audio", "audio probe unsupported", False)
-    opener = make_opener(prov.get("proxy", False))
-    base = "https://api.groq.com/openai/v1"
-    timeout = prov.get("health_timeout", HEALTH_CHECK_TIMEOUT)
-    start = time.time()
-    try:
-        # STT models
-        if "whisper" in model_id.lower():
-            fields = {"model": model_id, "response_format": "json", "language": "en", "temperature": "0"}
-            files = [{"name": "file", "filename": "sample.wav", "content": _tiny_wav_bytes(), "content_type": "audio/wav"}]
-            boundary, body = _multipart_body(fields, files)
-            req = urllib.request.Request(
-                f"{base}/audio/transcriptions",
-                data=body,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": f"multipart/form-data; boundary={boundary}",
-                    "Accept": "application/json",
-                    "User-Agent": "Mozilla/5.0",
-                },
-            )
-            with opener.open(req, timeout=timeout) as f:
-                json.loads(f.read().decode())
-            latency = int((time.time() - start) * 1000)
-            log.info(f"  ✅ {model_id}: {latency}ms (audio/stt)")
-            return (model_id, latency, True, prov.get("supports_tools", False), "audio", None, False)
-
-        # TTS models
-        if "orpheus" in model_id.lower() or "tts" in model_id.lower():
-            payload = {"model": model_id, "input": "test", "voice": "tara", "response_format": "mp3"}
-            req = urllib.request.Request(
-                f"{base}/audio/speech",
-                data=json.dumps(payload).encode(),
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                    "User-Agent": "Mozilla/5.0",
-                },
-            )
-            with opener.open(req, timeout=timeout) as f:
-                _ = f.read(32)
-            latency = int((time.time() - start) * 1000)
-            log.info(f"  ✅ {model_id}: {latency}ms (audio/tts)")
-            return (model_id, latency, True, prov.get("supports_tools", False), "audio", None, False)
-
-        return (model_id, 0, False, prov.get("supports_tools", False), "audio", "no audio probe rule", False)
-    except urllib.error.HTTPError as e:
-        err = f"HTTP Error {e.code}: {e.reason}"
-        rate_limited = (e.code == 429)
-        log.info(f"  {'⏸' if rate_limited else '❌'} {model_id}: {err}")
-        return (model_id, 0, False, False, "audio", err, rate_limited)
-    except Exception as e:
-        err = str(e)[:200]
-        log.info(f"  ❌ {model_id}: {e}")
-        return (model_id, 0, False, False, "audio", err, False)
-
-
 def _carry_or_set_availability(conn, prov_name, model_id, fresh_available, rate_limited):
     """Decide what to write to model_health.available.
 
@@ -236,7 +149,7 @@ def check_model(prov_name, prov, api_key, model_id):
     a temporary key-quota exhaustion is not the same as the model being broken."""
     category = categorize_model(model_id)
     if category == "audio":
-        return _check_audio_model(prov_name, prov, api_key, model_id)
+        return (model_id, 0, False, prov.get("supports_tools", False), "audio", None, False)
     if category not in ("text", "code"):
         return (model_id, 0, False, prov.get("supports_tools", False), category, None, False)
     try:

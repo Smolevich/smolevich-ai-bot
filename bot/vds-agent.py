@@ -429,12 +429,32 @@ def tg_get_file_bytes(token, file_id):
     with urllib.request.urlopen(url, timeout=60) as resp:
         return file_path, resp.read()
 
-def groq_transcribe_audio(audio_bytes, filename="audio.ogg", language="ru"):
+def _pick_groq_audio_model(provider, preferred_model, kind):
+    """Choose Groq audio model from selected model or recent audio health rows."""
+    mid = (preferred_model or "").lower()
+    if kind == "stt" and any(k in mid for k in ("whisper", "stt", "transcrib")):
+        return preferred_model
+    if kind == "tts" and any(k in mid for k in ("orpheus", "tts", "speech")):
+        return preferred_model
+    try:
+        for item in DB.get_recent_models(provider, max_age_sec=86400, category="audio", limit=30):
+            cand = item.get("id", "")
+            cl = cand.lower()
+            if kind == "stt" and "whisper" in cl:
+                return cand
+            if kind == "tts" and ("orpheus" in cl or "tts" in cl):
+                return cand
+    except Exception:
+        pass
+    return "whisper-large-v3-turbo" if kind == "stt" else "canopylabs/orpheus-v1-english"
+
+
+def groq_transcribe_audio(audio_bytes, filename="audio.ogg", language="ru", model="whisper-large-v3-turbo"):
     api_key = load_provider_key("groq")
     if not api_key:
         raise RuntimeError("No GROQ API key configured")
     fields = {
-        "model": "whisper-large-v3-turbo",
+        "model": model,
         "response_format": "json",
         "language": language,
         "temperature": "0",
@@ -482,14 +502,14 @@ def groq_transcribe_audio(audio_bytes, filename="audio.ogg", language="ru"):
         raise RuntimeError(f"HTTP {e.code}: {(body or e.reason)[:400]}")
     return (data.get("text") or "").strip()
 
-def groq_tts(text):
+def groq_tts(text, model="canopylabs/orpheus-v1-english", voice="autumn"):
     api_key = load_provider_key("groq")
     if not api_key:
         raise RuntimeError("No GROQ API key configured")
     payload = {
-        "model": "canopylabs/orpheus-v1-english",
+        "model": model,
         "input": text,
-        "voice": "autumn",
+        "voice": voice,
         "response_format": "wav",
     }
     req = urllib.request.Request(
@@ -627,6 +647,12 @@ class DB:
                     )
                 except Exception:
                     pass
+                try:
+                    conn.execute(
+                        "ALTER TABLE request_log ADD COLUMN request_http_ms INTEGER DEFAULT 0"
+                    )
+                except Exception:
+                    pass
                 conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS media_request_log (
@@ -724,8 +750,19 @@ class DB:
             model = sanitize_model_id(model)
             def _op():
                 with DB._connect() as conn:
-                    conn.execute("INSERT OR REPLACE INTO sessions (user_id, model, history_json, provider, tools_enabled, engine_mode) VALUES (?, ?, ?, ?, ?, ?)",
-                                 (uid, model, json.dumps(history), provider or PROVIDER_DEFAULT, 1 if tools_enabled else 0, engine_mode or "native"))
+                    conn.execute(
+                        """
+                        INSERT INTO sessions (user_id, model, history_json, provider, tools_enabled, engine_mode)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(user_id) DO UPDATE SET
+                            model=excluded.model,
+                            history_json=excluded.history_json,
+                            provider=excluded.provider,
+                            tools_enabled=excluded.tools_enabled,
+                            engine_mode=excluded.engine_mode
+                        """,
+                        (uid, model, json.dumps(history), provider or PROVIDER_DEFAULT, 1 if tools_enabled else 0, engine_mode or "native"),
+                    )
                     conn.commit()
             DB._with_retry(_op, "save_session")
         except Exception as e:
@@ -768,13 +805,13 @@ class DB:
             log.error(f"DB get_model_info: {e}")
         return None
     @staticmethod
-    def log_request(uid, provider, model, prompt_tokens, completion_tokens, finish_reason, tool_calls, error=None, mode="native"):
+    def log_request(uid, provider, model, prompt_tokens, completion_tokens, finish_reason, tool_calls, error=None, mode="native", request_http_ms=0):
         try:
             def _op():
                 with DB._connect() as conn:
                     cur = conn.execute(
-                        "INSERT INTO request_log (ts, uid, provider, model, prompt_tokens, completion_tokens, finish_reason, tool_calls, error, mode, delivered) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
-                        (int(time.time()), uid, provider, model, prompt_tokens, completion_tokens, finish_reason, tool_calls, error, mode))
+                        "INSERT INTO request_log (ts, uid, provider, model, prompt_tokens, completion_tokens, finish_reason, tool_calls, error, mode, delivered, request_http_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+                        (int(time.time()), uid, provider, model, prompt_tokens, completion_tokens, finish_reason, tool_calls, error, mode, int(request_http_ms or 0)))
                     conn.commit()
                     return cur.lastrowid
             return DB._with_retry(_op, "log_request")
@@ -939,7 +976,7 @@ def format_wait_time(seconds):
 
 def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tools=True, use_proxy=False):
     usage = {"prompt_tokens": 0, "completion_tokens": 0}
-    meta = {"finish_reason": None, "tool_calls_total": 0, "error": None}
+    meta = {"finish_reason": None, "tool_calls_total": 0, "error": None, "http_latency_ms": 0}
     roles = [m.get("role", "?") for m in messages]
     log.info(f"ask_llm: model={model} tools={use_tools} proxy={use_proxy} msgs={len(messages)} roles={roles} est_tokens={estimate_tokens(messages)}")
     opener = _make_opener(use_proxy)
@@ -956,7 +993,9 @@ def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tool
         if retry_use_tools: payload.update({"tools": TOOLS, "tool_choice": "auto"})
         req = urllib.request.Request(api_url, json.dumps(payload).encode(), req_headers)
         try:
+            t_http = time.time()
             with opener.open(req, timeout=120) as f:
+                meta["http_latency_ms"] += int((time.time() - t_http) * 1000)
                 res = json.loads(f.read().decode())
                 u = res.get("usage", {}); usage["prompt_tokens"] += u.get("prompt_tokens", 0); usage["completion_tokens"] += u.get("completion_tokens", 0)
                 msg = res["choices"][0]["message"]
@@ -975,7 +1014,9 @@ def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tool
                                 cont_payload = {"model": model, "messages": messages, "max_tokens": 4096}
                                 cont_req = urllib.request.Request(api_url, json.dumps(cont_payload).encode(), req_headers)
                                 try:
+                                    t_cont = time.time()
                                     with opener.open(cont_req, timeout=120) as cf:
+                                        meta["http_latency_ms"] += int((time.time() - t_cont) * 1000)
                                         cont_res = json.loads(cf.read().decode())
                                         cu = cont_res.get("usage", {})
                                         usage["prompt_tokens"] += cu.get("prompt_tokens", 0)
@@ -1033,6 +1074,10 @@ def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tool
                         res_t = TOOL_HANDLERS.get(fname)(fargs) if TOOL_HANDLERS.get(fname) else "Error"
                     messages.append({"role": "tool", "tool_call_id": tc["id"], "content": res_t})
         except urllib.error.HTTPError as e:
+            try:
+                meta["http_latency_ms"] += int((time.time() - t_http) * 1000)
+            except Exception:
+                pass
             meta["error"] = f"HTTP {e.code}"
             err_body = ""
             try:
@@ -1052,6 +1097,10 @@ def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tool
                 log.warning(f"HTTP {e.code} from provider for model={model}: {err_body[:400]}")
             return f"❌ HTTP Error: {e}", usage, meta
         except Exception as e:
+            try:
+                meta["http_latency_ms"] += int((time.time() - t_http) * 1000)
+            except Exception:
+                pass
             meta["error"] = str(e)[:200]
             log.error(f"ask_llm error: {e}"); return f"❌ Error: {e}", usage, meta
     meta["error"] = "loop_limit"
@@ -1453,13 +1502,15 @@ def handle_command(uid, username, text, token, admin_id):
         try:
             t0 = time.time()
             source_text = parts[1].strip()
-            audio = groq_tts(source_text)
+            sess = DB.get_session(uid)
+            tts_model = _pick_groq_audio_model(sess.get("provider", "groq"), sess.get("model", ""), "tts")
+            audio = groq_tts(source_text, model=tts_model)
             latency_ms = int((time.time() - t0) * 1000)
             res = tg_send_document_bytes(token, uid, "tts.wav", audio, caption="🔊 TTS")
             DB.log_media_request(
                 uid,
                 "groq",
-                "canopylabs/orpheus-v1-english",
+                tts_model,
                 "tts",
                 input_size_bytes=len(source_text.encode("utf-8")),
                 output_size_bytes=len(audio or b""),
@@ -1473,7 +1524,7 @@ def handle_command(uid, username, text, token, admin_id):
             DB.log_media_request(
                 uid,
                 "groq",
-                "canopylabs/orpheus-v1-english",
+                _pick_groq_audio_model("groq", DB.get_session(uid).get("model", ""), "tts"),
                 "tts",
                 input_size_bytes=len(parts[1].strip().encode("utf-8")) if len(parts) > 1 else 0,
                 output_size_bytes=0,
@@ -1540,12 +1591,17 @@ def process_update(upd, token, admin_id):
                 file_id = media.get("file_id")
                 t0 = time.time()
                 file_path, blob = tg_get_file_bytes(token, file_id)
-                transcript = groq_transcribe_audio(blob, filename=os.path.basename(file_path or "audio.ogg"))
+                stt_model = _pick_groq_audio_model(
+                    sess_for_media.get("provider", "groq"),
+                    sess_for_media.get("model", ""),
+                    "stt",
+                )
+                transcript = groq_transcribe_audio(blob, filename=os.path.basename(file_path or "audio.ogg"), model=stt_model)
                 latency_ms = int((time.time() - t0) * 1000)
                 DB.log_media_request(
                     uid,
                     "groq",
-                    "whisper-large-v3-turbo",
+                    stt_model,
                     "stt",
                     input_size_bytes=len(blob or b""),
                     output_size_bytes=len((transcript or "").encode("utf-8")),
@@ -1561,7 +1617,7 @@ def process_update(upd, token, admin_id):
                 DB.log_media_request(
                     uid,
                     "groq",
-                    "whisper-large-v3-turbo",
+                    _pick_groq_audio_model(sess_for_media.get("provider", "groq"), sess_for_media.get("model", ""), "stt"),
                     "stt",
                     input_size_bytes=0,
                     output_size_bytes=0,
@@ -1638,7 +1694,7 @@ def process_update(upd, token, admin_id):
             ans = "⚠️ Empty model output. Try `/tools off` or choose another model via `/models`."
         DB.add_usage(uid, usage['prompt_tokens'], usage['completion_tokens'])
         req_id = DB.log_request(uid, provider, model, usage['prompt_tokens'], usage['completion_tokens'],
-                                meta['finish_reason'], meta['tool_calls_total'], meta['error'], mode=sess.get("engine_mode", "native"))
+                                meta['finish_reason'], meta['tool_calls_total'], meta['error'], mode=sess.get("engine_mode", "native"), request_http_ms=meta.get("http_latency_ms", 0))
         hist.append({"role": "user", "content": text}); hist.append({"role": "assistant", "content": ans})
         # Avoid clobbering mode/tools with stale in-memory session when updates are processed concurrently.
         latest = DB.get_session(uid)

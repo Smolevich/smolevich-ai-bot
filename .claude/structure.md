@@ -2,10 +2,11 @@
 
 Everything bot-related lives in `bot/`:
 
-- `bot/vds-agent.py` — the bot itself (~1250 lines): Telegram long-poll/webhook, SQLite, providers (OpenRouter / Groq / Cerebras / NVIDIA), Podman sessions.
+- `bot/vds-agent.py` — the bot itself (~1250+ lines): Telegram long-poll/webhook, SQLite, providers (OpenRouter / Groq / Cerebras / NVIDIA), Podman sessions, STT/TTS handlers.
 - `bot/vds-agent.service` — systemd unit, runs `/usr/bin/python3 /usr/local/bin/vds-agent` as root.
 - `bot/migrate.py` — yoyo migration runner (deploys to server as `migrate_bot_db`).
-- `bot/model-health-check.py` — every-5-minutes cron job, writes provider/model availability into the bot DB.
+- `bot/model-health-check.py` — text/code model health cron job, writes provider/model availability into the bot DB.
+- `bot/model-audio-check.py` — separate audio (STT/TTS) health cron job.
 - `bot/migrations/` — yoyo migrations against SQLite (`/var/lib/telegram-llm-bot.db`).
 - `bot/Containerfile.acpx-claude` — Podman image (`acpx-claude:latest`) used by the sandbox; built manually on the host.
 - `bot/opx.sh` — opencode wrapper used by the bot's `/run` command (dev tool).

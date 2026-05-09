@@ -1,6 +1,6 @@
 # smolevich-ai-bot
 
-Telegram bot using free-tier LLM providers with a Podman sandbox. Runs on a VDS as the `vds-agent` systemd unit. Single-file codebase (`bot/vds-agent.py`), stdlib only.
+Telegram bot using free-tier LLM providers with a Podman sandbox. Runs on a VDS as the `vds-agent` systemd unit. Main runtime is single-file (`bot/vds-agent.py`), stdlib only.
 
 Details live in `.claude/`:
 
