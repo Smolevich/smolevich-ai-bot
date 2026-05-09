@@ -296,12 +296,16 @@ class DB:
             with DB.connectDb() as conn:
                 rows = conn.execute(
                     """
-                    SELECT
-                        provider,
-                        model,
-                        SUM(CASE WHEN delivered = 1 THEN 1 ELSE 0 END) AS delivered_answers,
-                        COUNT(*) AS total_requests
-                    FROM request_log
+                    SELECT provider, model,
+                           SUM(delivered_ok) AS delivered_answers,
+                           COUNT(*) AS total_requests
+                    FROM (
+                        SELECT provider, model, CASE WHEN delivered = 1 THEN 1 ELSE 0 END AS delivered_ok
+                        FROM request_log
+                        UNION ALL
+                        SELECT provider, model, CASE WHEN ok = 1 THEN 1 ELSE 0 END AS delivered_ok
+                        FROM media_request_log
+                    ) t
                     GROUP BY provider, model
                     ORDER BY delivered_answers DESC, total_requests DESC
                     LIMIT ?
@@ -331,11 +335,16 @@ class DB:
             with DB.connectDb() as conn:
                 rows = conn.execute(
                     """
-                    SELECT
-                        provider,
-                        SUM(CASE WHEN delivered = 1 THEN 1 ELSE 0 END) AS delivered_answers,
-                        COUNT(*) AS total_requests
-                    FROM request_log
+                    SELECT provider,
+                           SUM(delivered_ok) AS delivered_answers,
+                           COUNT(*) AS total_requests
+                    FROM (
+                        SELECT provider, CASE WHEN delivered = 1 THEN 1 ELSE 0 END AS delivered_ok
+                        FROM request_log
+                        UNION ALL
+                        SELECT provider, CASE WHEN ok = 1 THEN 1 ELSE 0 END AS delivered_ok
+                        FROM media_request_log
+                    ) t
                     GROUP BY provider
                     ORDER BY delivered_answers DESC, total_requests DESC
                     LIMIT ?

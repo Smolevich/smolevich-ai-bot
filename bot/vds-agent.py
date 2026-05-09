@@ -921,7 +921,7 @@ def build_top_text():
         return "Пока нет данных для топа."
     txt = (
         "📊 *Top Stats*\n"
-        "_delivered = ответ действительно отправлен пользователю_\n\n"
+        "_delivered = успешный ответ пользователю (text + stt/tts)_\n\n"
         "🏆 *Top 3 Models*\n"
     )
     for i, item in enumerate(top_models, start=1):
