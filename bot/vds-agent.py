@@ -793,6 +793,13 @@ def handle_command(uid, username, text, token, admin_id):
         active = "да" if (st.get("active") or inflight) else "нет"
         mode = sess.get("engine_mode", "native")
         sid = st.get("active_session_id") or st.get("last_session_id") or sess.get("last_session_id")
+        if mode == "native" and not sid:
+            sid = uuid.uuid4().hex
+            DB.set_last_session_id(uid, sid)
+            with runtimeStatusLock:
+                st_now = dict(runtimeStatus.get(uid, {}))
+                st_now["last_session_id"] = sid
+                runtimeStatus[uid] = st_now
         sid_text = sid if sid else "нет (новая сессия — UUID появится после первого ответа)"
         txt = (
             "📌 Текущий статус\n"
