@@ -1423,10 +1423,15 @@ def process_update(upd, token, admin_id):
         if uid is None:
             log.warning(f"Skipping message without sender info. Keys: {list(msg.keys())}")
             return
-        # STT path: if user requested /stt, accept incoming voice/audio/document.
+        # STT path: accept incoming voice/audio/document when either:
+        # 1) user explicitly requested /stt, or
+        # 2) selected model is an audio/STT model (auto mode).
         with _PENDING_STT_LOCK:
             stt_pending = uid in _PENDING_STT_USERS
-        if stt_pending and ("voice" in msg or "audio" in msg or "document" in msg):
+        sess_for_media = DB.get_session(uid)
+        model_for_media = (sess_for_media.get("model") or "").lower()
+        auto_stt_model = any(k in model_for_media for k in ("whisper", "speech-to-text", "stt"))
+        if (stt_pending or auto_stt_model) and ("voice" in msg or "audio" in msg or "document" in msg):
             try:
                 media = msg.get("voice") or msg.get("audio") or msg.get("document")
                 file_id = media.get("file_id")

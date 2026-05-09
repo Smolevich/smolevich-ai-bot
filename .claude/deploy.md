@@ -39,3 +39,20 @@ ssh vscale 'systemctl is-active vds-agent'
 ssh vscale 'journalctl -u vds-agent -n 50'
 ssh vscale 'tail -n 50 /var/log/model-health-check.log'
 ```
+
+## Telegram command menu refresh
+
+`setMyCommands` is called on every bot start, but Telegram clients can cache the slash menu.
+
+Server-side checks:
+
+```
+ssh vscale 'systemctl restart vds-agent'
+ssh vscale 'journalctl -u vds-agent -n 80 --no-pager'
+```
+
+Client-side refresh (if `/stt`/`/tts` still not visible):
+
+1. Type command manually once (e.g. `/stt`) — backend command is already active.
+2. Reopen chat with the bot (or restart Telegram app) and wait 30-60s.
+3. If needed, send `/start` to force menu reload in some clients.
