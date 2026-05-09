@@ -219,7 +219,64 @@ def tg_send_text(token, chat_id, text, parse_mode=None, reply_markup=None):
         return tg_request(token, "sendMessage", payload)
     return res
 
-def _split_telegram_text(text, max_len=3500):
+def to_telegram_markdown(text):
+    """Best-effort conversion of GitHub-flavored markdown to Telegram Markdown V1.
+
+    Telegram V1 has *bold*, _italic_, `code`, ```code blocks```, [text](url) and
+    nothing else — no double-asterisk bold, no headers, no lists. Models almost
+    always emit **bold**, so we collapse it to *bold* outside code spans/blocks.
+    Also strip leading '# ' / '## ' style headers, replacing the line with bolded
+    text. Anything we can't safely convert is left alone — Telegram falls back to
+    plain text if a parse error happens (see tg_send_text)."""
+    if not text:
+        return text
+    out = []
+    i = 0
+    n = len(text)
+    while i < n:
+        # ```fenced code block``` — copy verbatim
+        if text.startswith("```", i):
+            end = text.find("```", i + 3)
+            if end == -1:
+                out.append(text[i:])
+                break
+            out.append(text[i:end + 3])
+            i = end + 3
+            continue
+        # `inline code` — copy verbatim
+        if text[i] == "`":
+            end = text.find("`", i + 1)
+            if end == -1:
+                out.append(text[i])
+                i += 1
+                continue
+            out.append(text[i:end + 1])
+            i = end + 1
+            continue
+        # Markdown header at line start: turn '# Foo' into '*Foo*'
+        if text[i] == "#" and (i == 0 or text[i - 1] == "\n"):
+            j = i
+            while j < n and text[j] == "#":
+                j += 1
+            if j < n and text[j] == " ":
+                line_end = text.find("\n", j)
+                if line_end == -1:
+                    line_end = n
+                line = text[j + 1:line_end].strip()
+                out.append("*" + line + "*")
+                i = line_end
+                continue
+        # **bold** -> *bold*
+        if text.startswith("**", i):
+            out.append("*")
+            i += 2
+            continue
+        out.append(text[i])
+        i += 1
+    return "".join(out)
+
+
+def split_telegram_text(text, max_len=3500):
     text = text or ""
     if len(text) <= max_len:
         return [text]
@@ -238,13 +295,13 @@ def _split_telegram_text(text, max_len=3500):
     return parts
 
 def tg_send_long_text(token, chat_id, text, parse_mode=None):
-    chunks = _split_telegram_text(text)
+    chunks = split_telegram_text(text)
     last = {"ok": True}
     all_ok = True
-    for i, ch in enumerate(chunks):
-        # Avoid markdown parse failures on arbitrary long chunks.
-        pm = parse_mode if (i == 0 and parse_mode) else None
-        last = tg_send_text(token, chat_id, ch, parse_mode=pm)
+    for ch in chunks:
+        # Apply parse_mode to every chunk; tg_send_text retries as plain text on parse failure,
+        # so a single malformed chunk degrades only itself instead of dropping all formatting.
+        last = tg_send_text(token, chat_id, ch, parse_mode=parse_mode)
         if not last.get("ok"):
             all_ok = False
     out = dict(last)
@@ -1012,6 +1069,9 @@ def handle_command(uid, username, text, token, admin_id):
     if text == "/reset":
         sess = DB.get_session(uid)
         DB.save_session(uid, sess["model"], [], provider=sess["provider"], tools_enabled=sess["tools_enabled"], engine_mode=sess.get("engine_mode", "native"))
+        DB.set_last_session_id(uid, "")
+        with _RUNTIME_STATUS_LOCK:
+            _RUNTIME_STATUS.pop(uid, None)
         u_dir = os.path.join(SESSIONS_ROOT, str(uid))
         if os.path.exists(u_dir): shutil.rmtree(u_dir); os.makedirs(u_dir)
         tg_request(token, "sendMessage", {"chat_id": uid, "text": "Reset done."})
@@ -1058,12 +1118,8 @@ def handle_command(uid, username, text, token, admin_id):
             inflight = uid in _INFLIGHT_USERS
         active = "да" if (st.get("active") or inflight) else "нет"
         mode = sess.get("engine_mode", "native")
-        # Session UUID is an ACP-mode concept; native talks to the LLM stateless-ly per turn.
-        session_uuid_line = ""
-        if mode in ("claude", "opencode", "pi"):
-            sid = st.get("active_session_id") or st.get("last_session_id") or sess.get("last_session_id")
-            sid_text = sid if sid else "нет (после перезапуска ещё не было ACP-запроса)"
-            session_uuid_line = f"• Session UUID: {sid_text}\n"
+        sid = st.get("active_session_id") or st.get("last_session_id") or sess.get("last_session_id")
+        sid_text = sid if sid else "нет (новая сессия — UUID появится после первого ответа)"
         txt = (
             "📌 Текущий статус\n"
             f"• Провайдер: `{sess['provider']}`\n"
@@ -1071,7 +1127,7 @@ def handle_command(uid, username, text, token, admin_id):
             f"• Режим: `{mode}`\n"
             f"• Tools: {'on' if sess.get('tools_enabled', True) else 'off'}\n"
             f"• Контекст: {ctx_tokens}/{MAX_CONTEXT_TOKENS} ({ctx_pct}%)\n"
-            f"{session_uuid_line}"
+            f"• Session UUID: {sid_text}\n"
             f"• Активный запрос: {active}\n"
             f"• Версия: `{__VERSION__}`"
         )
@@ -1216,7 +1272,7 @@ def process_update(upd, token, admin_id):
             hist = compact_history(prov["url"], api_key, model, hist, uid, admin_id, use_proxy=use_proxy)
 
         role_desc = "You are an ADMIN with full internet access." if uid == admin_id else "You are a USER. Internet restricted."
-        sys_prompt = f"VDS Agent. Instructions: {role_desc} Environment: Alpine Linux. No 'requests' lib, use 'urllib.request', wget, curl. Use DuckDuckGo (html.duckduckgo.com) if Google fails. Output: plain text only — no markdown, no asterisks for bold/italic, no triple backticks for code blocks. Use line breaks and bullets (- or •) to structure. Be concise — show actual command output, no hypothetical examples, no tables with status, no 'next steps' sections. Just execute and show results. When user sends coordinates [Геолокация: lat, lon], use them for location-based queries (search nearby places, weather, etc.). Always complete your answer fully — never cut off mid-sentence."
+        sys_prompt = f"VDS Agent. Instructions: {role_desc} Environment: Alpine Linux. No 'requests' lib, use 'urllib.request', wget, curl. Use DuckDuckGo (html.duckduckgo.com) if Google fails. Output: Telegram Markdown V1 — *bold* (single asterisk, NEVER double), _italic_, `inline code`, triple backticks for code blocks, [text](url) for links. Do NOT use **double asterisks** — Telegram does not render them. Do NOT use # headers — bold the line instead. Be concise — show actual command output, no hypothetical examples, no tables with status, no 'next steps' sections. Just execute and show results. When user sends coordinates [Геолокация: lat, lon], use them for location-based queries (search nearby places, weather, etc.). Always complete your answer fully — never cut off mid-sentence."
 
         mode = sess.get("engine_mode", "native")
         if mode in ("claude", "opencode", "pi"):
@@ -1243,10 +1299,24 @@ def process_update(upd, token, admin_id):
             engine_mode=latest.get("engine_mode", sess.get("engine_mode", "native")),
         )
         model_short = model.split("/")[-1] if "/" in model else model
-        sid = meta.get("session_id", "")
+        if mode in ("claude", "opencode", "pi"):
+            sid = meta.get("session_id", "")
+        else:
+            # Native mode is stateless per turn API-side, but we want a stable session UUID
+            # for /status, the footer, and human reference. Generate once after first
+            # successful response and persist to sessions.last_session_id; /reset clears it.
+            sid = sess.get("last_session_id") or ""
+            if not sid:
+                sid = uuid.uuid4().hex
+                DB.set_last_session_id(uid, sid)
+                with _RUNTIME_STATUS_LOCK:
+                    st_now = dict(_RUNTIME_STATUS.get(uid, {}))
+                    st_now["last_session_id"] = sid
+                    _RUNTIME_STATUS[uid] = st_now
         sid_part = f" | sid: {sid[:8]}" if sid else ""
-        reply = f"{ans}\n\n[{provider}/{model_short} | In: {usage['prompt_tokens']} | Out: {usage['completion_tokens']} | Ctx: {estimate_tokens(hist)}/{MAX_CONTEXT_TOKENS}{sid_part}]"
-        send_res = tg_send_long_text(token, uid, reply)
+        footer = f"[{provider}/{model_short} | In: {usage['prompt_tokens']} | Out: {usage['completion_tokens']} | Ctx: {estimate_tokens(hist)}/{MAX_CONTEXT_TOKENS}{sid_part}]"
+        reply = to_telegram_markdown(ans) + "\n\n" + footer
+        send_res = tg_send_long_text(token, uid, reply, parse_mode="Markdown")
         DB.set_request_delivered(req_id, bool(send_res.get("ok")))
         with _INFLIGHT_LOCK:
             _INFLIGHT_USERS.discard(uid)
