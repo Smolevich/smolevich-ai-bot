@@ -86,6 +86,8 @@ _INFLIGHT_LOCK = threading.Lock()
 _EXECUTOR = ThreadPoolExecutor(max_workers=10)
 _RUNTIME_STATUS = {}
 _RUNTIME_STATUS_LOCK = threading.Lock()
+_PENDING_STT_USERS = set()
+_PENDING_STT_LOCK = threading.Lock()
 
 # --- Tools ---
 def tool_run_in_container(command, uid, allow_network=False):
@@ -306,6 +308,61 @@ def split_telegram_text(text, max_len=3500):
         parts.append(buf)
     return parts
 
+def categorize_model_local(model_id):
+    mid = (model_id or "").lower()
+    if any(k in mid for k in ("whisper", "speech", "voice", "tts", "riva-translate", "audio")):
+        return "audio"
+    if any(k in mid for k in ("coder", "codestral", "devstral", "starcoder")):
+        return "code"
+    return "text"
+
+def build_models_view(sess, category="text", limit=12):
+    prov = sess["provider"]
+    category = (category or "text").lower()
+    if category not in ("text", "audio"):
+        category = "text"
+    ms = DB.get_recent_models(prov, max_age_sec=600, category=category, limit=limit)
+    if not ms:
+        fresh = fetch_models(prov)
+        ms = []
+        for m in fresh:
+            mid = m["id"]
+            cat = categorize_model_local(mid)
+            if category == "audio" and cat != "audio":
+                continue
+            if category == "text" and cat == "audio":
+                continue
+            ms.append({
+                "id": mid,
+                "latency_ms": 0,
+                "available": True,
+                "supportsTools": bool(m.get("supportsTools")),
+            })
+            if len(ms) >= limit:
+                break
+    kb = []
+    toggle_row = [
+        {"text": f"{'✅ ' if category == 'text' else ''}Text", "callback_data": "models_cat:text"},
+        {"text": f"{'✅ ' if category == 'audio' else ''}Audio", "callback_data": "models_cat:audio"},
+    ]
+    kb.append(toggle_row)
+    for m in ms[:limit]:
+        mid = m["id"]
+        latency = m.get("latency_ms") or 0
+        available = m.get("available", True)
+        tools_icon = "🛠" if m.get("supportsTools") else ""
+        if available and latency:
+            status_icon = "🟢"
+        elif available:
+            status_icon = "⚪"
+        else:
+            status_icon = "🔴"
+        latency_tag = f" {latency}ms" if latency else ""
+        label = mid.split("/")[-1] if "/" in mid else mid
+        kb.append([{"text": f"{status_icon}{tools_icon} {label}{latency_tag}", "callback_data": f"set_model:{mid}"}])
+    txt = f"Models ({prov}, {category}):"
+    return txt, kb
+
 def tg_send_long_text(token, chat_id, text, parse_mode=None):
     chunks = split_telegram_text(text)
     last = {"ok": True}
@@ -320,6 +377,108 @@ def tg_send_long_text(token, chat_id, text, parse_mode=None):
     out["ok"] = all_ok
     return out
 
+def _multipart_body(fields, files):
+    boundary = "----WebKitFormBoundary" + uuid.uuid4().hex
+    out = bytearray()
+    for name, value in fields.items():
+        out.extend(f"--{boundary}\r\n".encode())
+        out.extend(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode())
+        out.extend(str(value).encode())
+        out.extend(b"\r\n")
+    for f in files:
+        out.extend(f"--{boundary}\r\n".encode())
+        out.extend(
+            f'Content-Disposition: form-data; name="{f["name"]}"; filename="{f["filename"]}"\r\n'.encode()
+        )
+        out.extend(f'Content-Type: {f.get("content_type", "application/octet-stream")}\r\n\r\n'.encode())
+        out.extend(f["content"])
+        out.extend(b"\r\n")
+    out.extend(f"--{boundary}--\r\n".encode())
+    return boundary, bytes(out)
+
+def tg_send_document_bytes(token, chat_id, filename, content, caption=None):
+    try:
+        url = f"https://api.telegram.org/bot{token}/sendDocument"
+        fields = {"chat_id": str(chat_id)}
+        if caption:
+            fields["caption"] = caption
+        files = [{
+            "name": "document",
+            "filename": filename,
+            "content": content,
+            "content_type": "application/octet-stream",
+        }]
+        boundary, body = _multipart_body(fields, files)
+        req = urllib.request.Request(
+            url,
+            data=body,
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        )
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            return json.loads(resp.read().decode())
+    except Exception as e:
+        log.error(f"tg_send_document_bytes error: {e}")
+        return {"ok": False, "description": str(e)}
+
+def tg_get_file_bytes(token, file_id):
+    meta = tg_request(token, "getFile", {"file_id": file_id})
+    if not meta.get("ok"):
+        raise RuntimeError(f"getFile failed: {meta}")
+    file_path = meta["result"]["file_path"]
+    url = f"https://api.telegram.org/file/bot{token}/{file_path}"
+    with urllib.request.urlopen(url, timeout=60) as resp:
+        return file_path, resp.read()
+
+def groq_transcribe_audio(audio_bytes, filename="audio.ogg", language="ru"):
+    api_key = load_provider_key("groq")
+    if not api_key:
+        raise RuntimeError("No GROQ API key configured")
+    fields = {
+        "model": "whisper-large-v3-turbo",
+        "response_format": "json",
+        "language": language,
+        "temperature": "0",
+    }
+    files = [{"name": "file", "filename": filename, "content": audio_bytes, "content_type": "audio/ogg"}]
+    boundary, body = _multipart_body(fields, files)
+    req = urllib.request.Request(
+        "https://api.groq.com/openai/v1/audio/transcriptions",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Accept": "application/json",
+            "User-Agent": "curl/8.7.1",
+        },
+    )
+    opener = _make_opener(True)
+    with opener.open(req, timeout=120) as resp:
+        data = json.loads(resp.read().decode())
+    return (data.get("text") or "").strip()
+
+def groq_tts(text):
+    api_key = load_provider_key("groq")
+    if not api_key:
+        raise RuntimeError("No GROQ API key configured")
+    payload = {
+        "model": "canopylabs/orpheus-v1-english",
+        "input": text,
+        "voice": "tara",
+        "response_format": "mp3",
+    }
+    req = urllib.request.Request(
+        "https://api.groq.com/openai/v1/audio/speech",
+        data=json.dumps(payload).encode(),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": "curl/8.7.1",
+        },
+    )
+    opener = _make_opener(True)
+    with opener.open(req, timeout=120) as resp:
+        return resp.read()
+
 
 def set_bot_commands(token):
     commands = [
@@ -330,6 +489,8 @@ def set_bot_commands(token):
         {"command": "mode", "description": "Engine mode: native/claude/opencode/pi"},
         {"command": "tools", "description": "Tools mode: on/off/status"},
         {"command": "model", "description": "Set model manually"},
+        {"command": "stt", "description": "Speech-to-text (send voice/audio next)"},
+        {"command": "tts", "description": "Text-to-speech: /tts your text"},
         {"command": "reset", "description": "Reset chat history"},
         {"command": "feedback", "description": "Send feedback to admin"},
         {"command": "version", "description": "Show bot version (commit SHA + build date)"},
@@ -712,8 +873,6 @@ def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tool
         "User-Agent": "curl/8.7.1",
     }
     retry_use_tools = use_tools
-    groq_edge_retry_done = False
-    tool_validation_retry_done = False
     for attempt in range(10):
         payload = {"model": model, "messages": messages, "max_tokens": 4096}
         if retry_use_tools: payload.update({"tools": TOOLS, "tool_choice": "auto"})
@@ -811,17 +970,6 @@ def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tool
                     wait_info = f" (Retry in {format_wait_time(max(0, v))})"
                 except: wait_info = f" ({val})"
                 return f"❌ Rate limit reached{wait_info}.", usage, meta
-            if e.code == 400 and "tool_use_failed" in err_body and not tool_validation_retry_done:
-                tool_validation_retry_done = True
-                retry_use_tools = False
-                log.warning(f"Tool validation failed for model={model}; retrying with tools disabled.")
-                continue
-            if e.code == 403 and "error code: 1010" in err_body.lower() and not groq_edge_retry_done:
-                groq_edge_retry_done = True
-                messages = compact_messages_for_provider(messages, keep_recent=8)
-                retry_use_tools = False
-                log.warning(f"Groq edge 1010 for model={model}; retrying with compacted context and tools disabled. msgs={len(messages)}")
-                continue
             if err_body:
                 log.warning(f"HTTP {e.code} from provider for model={model}: {err_body[:400]}")
             return f"❌ HTTP Error: {e}", usage, meta
@@ -1078,6 +1226,24 @@ def handle_callback(cb, token, admin_id):
                 tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Failed to update model", "show_alert": True})
         else:
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Model updated"})
+    elif data.startswith("models_cat:"):
+        cat = data.split(":", 1)[1].strip().lower()
+        sess = DB.get_session(uid)
+        txt, kb = build_models_view(sess, category=cat, limit=12)
+        res = tg_request(token, "editMessageText", {
+            "chat_id": cb["message"]["chat"]["id"],
+            "message_id": cb["message"]["message_id"],
+            "text": txt,
+            "reply_markup": {"inline_keyboard": kb},
+        })
+        if not res.get("ok"):
+            desc = (res.get("description") or "").lower()
+            if "message is not modified" in desc:
+                tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Already on this filter"})
+            else:
+                tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Failed to update list", "show_alert": True})
+        else:
+            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": f"Category: {cat}"})
     elif uid == admin_id and data.startswith("approve:"):
         t_uid = int(data.split(":")[1]); DB.set_allowed(t_uid, True)
         tg_request(token, "editMessageText", {"chat_id": cb["message"]["chat"]["id"], "message_id": cb["message"]["message_id"], "text": f"✅ Approved {t_uid}"})
@@ -1124,30 +1290,8 @@ def handle_command(uid, username, text, token, admin_id):
         tg_request(token, "sendMessage", {"chat_id": uid, "text": "Provider:", "reply_markup": {"inline_keyboard": kb}})
     elif text == "/models":
         sess = DB.get_session(uid)
-        prov = sess["provider"]
-        # Cron writes one row per current-top-list model every 5 minutes; treat anything touched
-        # within the last 10 minutes as "currently in the top list", regardless of availability.
-        # That gives us all-six visibility without paying the cost of a live endpoint fetch each call.
-        ms = DB.get_recent_models(prov, max_age_sec=600, limit=12)
-        if not ms:
-            fresh = fetch_models(prov)[:12]
-            ms = [{"id": m["id"], "latency_ms": 0, "available": True, "supportsTools": bool(m.get("supportsTools"))} for m in fresh]
-        kb = []
-        for m in ms[:12]:
-            mid = m["id"]
-            latency = m.get("latency_ms") or 0
-            available = m.get("available", True)
-            tools_icon = "🛠" if m.get("supportsTools") else ""
-            if available and latency:
-                status_icon = "🟢"
-            elif available:
-                status_icon = "⚪"
-            else:
-                status_icon = "🔴"
-            latency_tag = f" {latency}ms" if latency else ""
-            label = mid.split("/")[-1] if "/" in mid else mid
-            kb.append([{"text": f"{status_icon}{tools_icon} {label}{latency_tag}", "callback_data": f"set_model:{mid}"}])
-        tg_request(token, "sendMessage", {"chat_id": uid, "text": f"Models ({sess['provider']}):", "reply_markup": {"inline_keyboard": kb}})
+        txt, kb = build_models_view(sess, category="text", limit=12)
+        tg_request(token, "sendMessage", {"chat_id": uid, "text": txt, "reply_markup": {"inline_keyboard": kb}})
     elif text == "/status":
         sess = DB.get_session(uid)
         ctx_tokens = estimate_tokens(sess["history"])
@@ -1219,6 +1363,22 @@ def handle_command(uid, username, text, token, admin_id):
     elif text == "/version":
         txt = f"🔖 Version: `{__VERSION__}`"
         tg_request(token, "sendMessage", {"chat_id": uid, "text": txt, "parse_mode": "Markdown"})
+    elif text.startswith("/stt"):
+        with _PENDING_STT_LOCK:
+            _PENDING_STT_USERS.add(uid)
+        tg_send_text(token, uid, "🎙 Send voice/audio file now. I'll transcribe it.")
+    elif text.startswith("/tts"):
+        parts = text.split(maxsplit=1)
+        if len(parts) < 2 or not parts[1].strip():
+            tg_send_text(token, uid, "Use: /tts your text")
+            return True
+        try:
+            audio = groq_tts(parts[1].strip())
+            res = tg_send_document_bytes(token, uid, "tts.mp3", audio, caption="🔊 TTS")
+            if not res.get("ok"):
+                tg_send_text(token, uid, f"❌ TTS send failed: {(res.get('description') or '')[:200]}")
+        except Exception as e:
+            tg_send_text(token, uid, f"❌ TTS error: {str(e)[:300]}")
     elif text == "/users" and uid == admin_id:
         stats = DB.get_all_users_stats(); txt = "👥 *Users:*\n"
         for s in stats:
@@ -1263,6 +1423,26 @@ def process_update(upd, token, admin_id):
         if uid is None:
             log.warning(f"Skipping message without sender info. Keys: {list(msg.keys())}")
             return
+        # STT path: if user requested /stt, accept incoming voice/audio/document.
+        with _PENDING_STT_LOCK:
+            stt_pending = uid in _PENDING_STT_USERS
+        if stt_pending and ("voice" in msg or "audio" in msg or "document" in msg):
+            try:
+                media = msg.get("voice") or msg.get("audio") or msg.get("document")
+                file_id = media.get("file_id")
+                file_path, blob = tg_get_file_bytes(token, file_id)
+                transcript = groq_transcribe_audio(blob, filename=os.path.basename(file_path or "audio.ogg"))
+                if transcript:
+                    tg_send_long_text(token, uid, f"📝 Transcription:\n{transcript}")
+                else:
+                    tg_send_text(token, uid, "⚠️ No transcription text returned.")
+            except Exception as e:
+                tg_send_text(token, uid, f"❌ STT error: {str(e)[:300]}")
+            finally:
+                with _PENDING_STT_LOCK:
+                    _PENDING_STT_USERS.discard(uid)
+            return
+
         # Extract text from message or convert location/venue to text.
         if "text" in msg:
             text = msg["text"].strip()
