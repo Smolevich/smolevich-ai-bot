@@ -126,6 +126,18 @@ TOOL_HANDLERS = {"get_weather": lambda a: tool_get_weather(a["city"]), "get_exch
 def estimate_tokens(messages):
     text = "".join([m.get("content", "") or "" for m in messages]); return len(text) // 4
 
+def compact_messages_for_provider(messages, keep_recent=8):
+    if not messages:
+        return []
+    system = []
+    non_system = []
+    for m in messages:
+        if m.get("role") == "system":
+            system.append(m)
+        else:
+            non_system.append(m)
+    return system + non_system[-keep_recent:]
+
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 def sanitize_model_id(model):
@@ -692,9 +704,11 @@ def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tool
     roles = [m.get("role", "?") for m in messages]
     log.info(f"ask_llm: model={model} tools={use_tools} proxy={use_proxy} msgs={len(messages)} roles={roles} est_tokens={estimate_tokens(messages)}")
     opener = _make_opener(use_proxy)
+    retry_use_tools = use_tools
+    groq_edge_retry_done = False
     for attempt in range(10):
         payload = {"model": model, "messages": messages, "max_tokens": 4096}
-        if use_tools: payload.update({"tools": TOOLS, "tool_choice": "auto"})
+        if retry_use_tools: payload.update({"tools": TOOLS, "tool_choice": "auto"})
         req = urllib.request.Request(api_url, json.dumps(payload).encode(), {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"})
         try:
             with opener.open(req, timeout=120) as f:
@@ -775,6 +789,11 @@ def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tool
                     messages.append({"role": "tool", "tool_call_id": tc["id"], "content": res_t})
         except urllib.error.HTTPError as e:
             meta["error"] = f"HTTP {e.code}"
+            err_body = ""
+            try:
+                err_body = e.read().decode(errors="replace")
+            except Exception:
+                err_body = ""
             if e.code == 404: return f"❌ Model `{model}` unavailable.", usage, meta
             if e.code == 429:
                 val = e.headers.get("Retry-After") or e.headers.get("x-ratelimit-reset")
@@ -784,6 +803,14 @@ def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tool
                     wait_info = f" (Retry in {format_wait_time(max(0, v))})"
                 except: wait_info = f" ({val})"
                 return f"❌ Rate limit reached{wait_info}.", usage, meta
+            if e.code == 403 and "error code: 1010" in err_body.lower() and not groq_edge_retry_done:
+                groq_edge_retry_done = True
+                messages = compact_messages_for_provider(messages, keep_recent=8)
+                retry_use_tools = False
+                log.warning(f"Groq edge 1010 for model={model}; retrying with compacted context and tools disabled. msgs={len(messages)}")
+                continue
+            if err_body:
+                log.warning(f"HTTP {e.code} from provider for model={model}: {err_body[:400]}")
             return f"❌ HTTP Error: {e}", usage, meta
         except Exception as e:
             meta["error"] = str(e)[:200]
