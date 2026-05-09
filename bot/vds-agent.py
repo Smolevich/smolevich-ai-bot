@@ -502,8 +502,16 @@ def groq_tts(text):
         },
     )
     opener = _make_opener(True)
-    with opener.open(req, timeout=120) as resp:
-        return resp.read()
+    try:
+        with opener.open(req, timeout=120) as resp:
+            return resp.read()
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode(errors="replace")
+        except Exception:
+            body = ""
+        raise RuntimeError(f"HTTP {e.code}: {(body or e.reason)[:400]}")
 
 
 def set_bot_commands(token):
