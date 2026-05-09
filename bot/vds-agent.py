@@ -619,6 +619,23 @@ class DB:
                     )
                 except Exception:
                     pass
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS media_request_log (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ts INTEGER,
+                        uid INTEGER,
+                        provider TEXT,
+                        model TEXT,
+                        operation TEXT,
+                        input_size_bytes INTEGER DEFAULT 0,
+                        output_size_bytes INTEGER DEFAULT 0,
+                        latency_ms INTEGER DEFAULT 0,
+                        ok INTEGER DEFAULT 0,
+                        error TEXT
+                    )
+                    """
+                )
                 try:
                     conn.execute(
                         """
@@ -755,6 +772,33 @@ class DB:
             return DB._with_retry(_op, "log_request")
         except Exception as e:
             log.error(f"DB log_request: {e}")
+            return None
+
+    @staticmethod
+    def log_media_request(uid, provider, model, operation, input_size_bytes=0, output_size_bytes=0, latency_ms=0, ok=False, error=None):
+        try:
+            def _op():
+                with DB._connect() as conn:
+                    cur = conn.execute(
+                        "INSERT INTO media_request_log (ts, uid, provider, model, operation, input_size_bytes, output_size_bytes, latency_ms, ok, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            int(time.time()),
+                            uid,
+                            provider,
+                            model,
+                            operation,
+                            int(input_size_bytes or 0),
+                            int(output_size_bytes or 0),
+                            int(latency_ms or 0),
+                            1 if ok else 0,
+                            (error or "")[:500],
+                        ),
+                    )
+                    conn.commit()
+                    return cur.lastrowid
+            return DB._with_retry(_op, "log_media_request")
+        except Exception as e:
+            log.error(f"DB log_media_request: {e}")
             return None
 
     @staticmethod
@@ -1399,11 +1443,36 @@ def handle_command(uid, username, text, token, admin_id):
             tg_send_text(token, uid, "Use: /tts your text")
             return True
         try:
-            audio = groq_tts(parts[1].strip())
+            t0 = time.time()
+            source_text = parts[1].strip()
+            audio = groq_tts(source_text)
+            latency_ms = int((time.time() - t0) * 1000)
             res = tg_send_document_bytes(token, uid, "tts.mp3", audio, caption="🔊 TTS")
+            DB.log_media_request(
+                uid,
+                "groq",
+                "canopylabs/orpheus-v1-english",
+                "tts",
+                input_size_bytes=len(source_text.encode("utf-8")),
+                output_size_bytes=len(audio or b""),
+                latency_ms=latency_ms,
+                ok=bool(res.get("ok")),
+                error=None if res.get("ok") else (res.get("description") or "telegram_send_failed"),
+            )
             if not res.get("ok"):
                 tg_send_text(token, uid, f"❌ TTS send failed: {(res.get('description') or '')[:200]}")
         except Exception as e:
+            DB.log_media_request(
+                uid,
+                "groq",
+                "canopylabs/orpheus-v1-english",
+                "tts",
+                input_size_bytes=len(parts[1].strip().encode("utf-8")) if len(parts) > 1 else 0,
+                output_size_bytes=0,
+                latency_ms=0,
+                ok=False,
+                error=str(e),
+            )
             tg_send_text(token, uid, f"❌ TTS error: {str(e)[:300]}")
     elif text == "/users" and uid == admin_id:
         stats = DB.get_all_users_stats(); txt = "👥 *Users:*\n"
@@ -1461,13 +1530,37 @@ def process_update(upd, token, admin_id):
             try:
                 media = msg.get("voice") or msg.get("audio") or msg.get("document")
                 file_id = media.get("file_id")
+                t0 = time.time()
                 file_path, blob = tg_get_file_bytes(token, file_id)
                 transcript = groq_transcribe_audio(blob, filename=os.path.basename(file_path or "audio.ogg"))
+                latency_ms = int((time.time() - t0) * 1000)
+                DB.log_media_request(
+                    uid,
+                    "groq",
+                    "whisper-large-v3-turbo",
+                    "stt",
+                    input_size_bytes=len(blob or b""),
+                    output_size_bytes=len((transcript or "").encode("utf-8")),
+                    latency_ms=latency_ms,
+                    ok=bool(transcript),
+                    error=None if transcript else "empty_transcription",
+                )
                 if transcript:
                     tg_send_long_text(token, uid, f"📝 Transcription:\n{transcript}")
                 else:
                     tg_send_text(token, uid, "⚠️ No transcription text returned.")
             except Exception as e:
+                DB.log_media_request(
+                    uid,
+                    "groq",
+                    "whisper-large-v3-turbo",
+                    "stt",
+                    input_size_bytes=0,
+                    output_size_bytes=0,
+                    latency_ms=0,
+                    ok=False,
+                    error=str(e),
+                )
                 tg_send_text(token, uid, f"❌ STT error: {str(e)[:300]}")
             finally:
                 with _PENDING_STT_LOCK:
