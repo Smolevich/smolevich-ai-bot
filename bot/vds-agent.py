@@ -704,12 +704,19 @@ def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tool
     roles = [m.get("role", "?") for m in messages]
     log.info(f"ask_llm: model={model} tools={use_tools} proxy={use_proxy} msgs={len(messages)} roles={roles} est_tokens={estimate_tokens(messages)}")
     opener = _make_opener(use_proxy)
+    req_headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+        "Accept": "application/json",
+        # Cloudflare edge on some providers/proxy paths can block default urllib UA (error 1010).
+        "User-Agent": "curl/8.7.1",
+    }
     retry_use_tools = use_tools
     groq_edge_retry_done = False
     for attempt in range(10):
         payload = {"model": model, "messages": messages, "max_tokens": 4096}
         if retry_use_tools: payload.update({"tools": TOOLS, "tool_choice": "auto"})
-        req = urllib.request.Request(api_url, json.dumps(payload).encode(), {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"})
+        req = urllib.request.Request(api_url, json.dumps(payload).encode(), req_headers)
         try:
             with opener.open(req, timeout=120) as f:
                 res = json.loads(f.read().decode())
@@ -728,7 +735,7 @@ def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tool
                             full_content = content
                             for _cont in range(3):
                                 cont_payload = {"model": model, "messages": messages, "max_tokens": 4096}
-                                cont_req = urllib.request.Request(api_url, json.dumps(cont_payload).encode(), {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"})
+                                cont_req = urllib.request.Request(api_url, json.dumps(cont_payload).encode(), req_headers)
                                 try:
                                     with opener.open(cont_req, timeout=120) as cf:
                                         cont_res = json.loads(cf.read().decode())
