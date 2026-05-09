@@ -439,7 +439,18 @@ def groq_transcribe_audio(audio_bytes, filename="audio.ogg", language="ru"):
         "language": language,
         "temperature": "0",
     }
-    files = [{"name": "file", "filename": filename, "content": audio_bytes, "content_type": "audio/ogg"}]
+    fn = filename or "audio.ogg"
+    ext = fn.lower().rsplit(".", 1)[-1] if "." in fn else ""
+    content_type = "application/octet-stream"
+    if ext in ("ogg", "oga"):
+        content_type = "audio/ogg"
+    elif ext in ("mp3",):
+        content_type = "audio/mpeg"
+    elif ext in ("wav",):
+        content_type = "audio/wav"
+    elif ext in ("m4a",):
+        content_type = "audio/mp4"
+    files = [{"name": "file", "filename": fn, "content": audio_bytes, "content_type": content_type}]
     boundary, body = _multipart_body(fields, files)
     req = urllib.request.Request(
         "https://api.groq.com/openai/v1/audio/transcriptions",
@@ -452,8 +463,16 @@ def groq_transcribe_audio(audio_bytes, filename="audio.ogg", language="ru"):
         },
     )
     opener = _make_opener(True)
-    with opener.open(req, timeout=120) as resp:
-        data = json.loads(resp.read().decode())
+    try:
+        with opener.open(req, timeout=120) as resp:
+            data = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode(errors="replace")
+        except Exception:
+            body = ""
+        raise RuntimeError(f"HTTP {e.code}: {(body or e.reason)[:400]}")
     return (data.get("text") or "").strip()
 
 def groq_tts(text):
