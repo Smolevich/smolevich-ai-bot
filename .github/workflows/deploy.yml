@@ -54,8 +54,8 @@ jobs:
             sudo cp /tmp/deploy-bot/migrations/*.py /usr/local/bin/migrations/
             rm -rf /tmp/deploy-bot
             if [ -n "$BOT_PROXY_URL" ]; then
-              echo "$BOT_PROXY_URL" | sudo tee /etc/socks-monitor/.proxy_url >/dev/null
-              sudo chmod 600 /etc/socks-monitor/.proxy_url
+              sudo install -m 0600 /dev/null /etc/socks-monitor/vds-agent.env
+              echo "BOT_PROXY_URL=$BOT_PROXY_URL" | sudo tee /etc/socks-monitor/vds-agent.env >/dev/null
             fi
             sudo systemctl daemon-reload
             sudo /usr/local/bin/migrate_bot_db
