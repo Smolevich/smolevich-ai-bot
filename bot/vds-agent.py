@@ -109,6 +109,36 @@ def categorize_model_local(model_id):
         return "code"
     return "text"
 
+
+def capabilities_for_model(provider, model_id):
+    model = (model_id or "").lower()
+    caps = []
+    info = DB.get_model_info(provider, model_id)
+    category = (info or {}).get("category", "")
+    if category in ("text", "code"):
+        caps.append("text")
+    if category in ("audio",) or any(k in model for k in ("whisper", "speech", "voice", "tts", "orpheus")):
+        if any(k in model for k in ("whisper", "stt", "transcrib")):
+            caps.append("audio:stt")
+        if any(k in model for k in ("orpheus", "tts", "speech")):
+            caps.append("audio:tts")
+        if "audio:stt" not in caps and "audio:tts" not in caps:
+            caps.append("audio")
+    if category == "image" or any(k in model for k in ("image", "sdxl", "flux", "stable-diffusion")):
+        caps.append("image")
+    if category == "video" or "video" in model:
+        caps.append("video")
+    if not caps:
+        caps.append(categorize_model_local(model_id))
+    # Deduplicate preserving order.
+    seen = set()
+    out = []
+    for c in caps:
+        if c not in seen:
+            seen.add(c)
+            out.append(c)
+    return out
+
 def build_models_view(sess, category="text", limit=12):
     prov = sess["provider"]
     category = (category or "text").lower()
@@ -768,6 +798,7 @@ def handle_command(uid, username, text, token, admin_id):
             "📌 Текущий статус\n"
             f"• Провайдер: `{sess['provider']}`\n"
             f"• Модель: `{sess['model']}`\n"
+            f"• Возможности: {', '.join(capabilities_for_model(sess['provider'], sess['model']))}\n"
             f"• Режим: `{mode}`\n"
             f"• Tools: {'on' if sess.get('tools_enabled', True) else 'off'}\n"
             f"• Контекст: {ctx_tokens}/{MAX_CONTEXT_TOKENS} ({ctx_pct}%)\n"
