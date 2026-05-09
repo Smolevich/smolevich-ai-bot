@@ -156,26 +156,6 @@ def build_models_view(sess, category="text", limit=12):
     txt = f"Models ({prov}, {category}):"
     return txt, kb
 
-def pick_groq_audio_model(provider, preferred_model, kind):
-    """Choose Groq audio model from selected model or recent audio health rows."""
-    mid = (preferred_model or "").lower()
-    if kind == "stt" and any(k in mid for k in ("whisper", "stt", "transcrib")):
-        return preferred_model
-    if kind == "tts" and any(k in mid for k in ("orpheus", "tts", "speech")):
-        return preferred_model
-    try:
-        for item in DB.get_recent_models(provider, max_age_sec=86400, category="audio", limit=30):
-            cand = item.get("id", "")
-            cl = cand.lower()
-            if kind == "stt" and "whisper" in cl:
-                return cand
-            if kind == "tts" and ("orpheus" in cl or "tts" in cl):
-                return cand
-    except Exception:
-        pass
-    return "whisper-large-v3-turbo" if kind == "stt" else "canopylabs/orpheus-v1-english"
-
-
 def groq_transcribe_audio(audio_bytes, filename="audio.ogg", language="ru", model="whisper-large-v3-turbo"):
     api_key = load_provider_key("groq")
     if not api_key:
@@ -856,7 +836,7 @@ def handle_command(uid, username, text, token, admin_id):
             t0 = time.time()
             source_text = parts[1].strip()
             sess = DB.get_session(uid)
-            tts_model = pick_groq_audio_model(sess.get("provider", "groq"), sess.get("model", ""), "tts")
+            tts_model = sess.get("model", "")
             audio = groq_tts(source_text, model=tts_model)
             latency_ms = int((time.time() - t0) * 1000)
             res = tg_send_document_bytes(token, uid, "tts.wav", audio, caption="🔊 TTS")
@@ -877,7 +857,7 @@ def handle_command(uid, username, text, token, admin_id):
             DB.log_media_request(
                 uid,
                 "groq",
-                pick_groq_audio_model("groq", DB.get_session(uid).get("model", ""), "tts"),
+                DB.get_session(uid).get("model", ""),
                 "tts",
                 input_size_bytes=len(parts[1].strip().encode("utf-8")) if len(parts) > 1 else 0,
                 output_size_bytes=0,
@@ -944,11 +924,7 @@ def process_update(upd, token, admin_id):
                 file_id = media.get("file_id")
                 t0 = time.time()
                 file_path, blob = tg_get_file_bytes(token, file_id)
-                stt_model = pick_groq_audio_model(
-                    sess_for_media.get("provider", "groq"),
-                    sess_for_media.get("model", ""),
-                    "stt",
-                )
+                stt_model = sess_for_media.get("model", "")
                 transcript = groq_transcribe_audio(blob, filename=os.path.basename(file_path or "audio.ogg"), model=stt_model)
                 latency_ms = int((time.time() - t0) * 1000)
                 DB.log_media_request(
@@ -970,7 +946,7 @@ def process_update(upd, token, admin_id):
                 DB.log_media_request(
                     uid,
                     "groq",
-                    pick_groq_audio_model(sess_for_media.get("provider", "groq"), sess_for_media.get("model", ""), "stt"),
+                    sess_for_media.get("model", ""),
                     "stt",
                     input_size_bytes=0,
                     output_size_bytes=0,
