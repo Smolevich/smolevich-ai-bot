@@ -441,6 +441,13 @@ def groq_transcribe_audio(audio_bytes, filename="audio.ogg", language="ru"):
     }
     fn = filename or "audio.ogg"
     ext = fn.lower().rsplit(".", 1)[-1] if "." in fn else ""
+    # Telegram voice files are often .oga; Groq validates extension against a fixed allowlist.
+    if ext == "oga":
+        fn = fn[: -(len(ext))] + "ogg"
+        ext = "ogg"
+    if not ext:
+        fn = f"{fn}.ogg"
+        ext = "ogg"
     content_type = "application/octet-stream"
     if ext in ("ogg", "oga"):
         content_type = "audio/ogg"
