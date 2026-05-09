@@ -490,7 +490,7 @@ def groq_tts(text):
         "model": "canopylabs/orpheus-v1-english",
         "input": text,
         "voice": "autumn",
-        "response_format": "mp3",
+        "response_format": "wav",
     }
     req = urllib.request.Request(
         "https://api.groq.com/openai/v1/audio/speech",
@@ -1455,7 +1455,7 @@ def handle_command(uid, username, text, token, admin_id):
             source_text = parts[1].strip()
             audio = groq_tts(source_text)
             latency_ms = int((time.time() - t0) * 1000)
-            res = tg_send_document_bytes(token, uid, "tts.mp3", audio, caption="🔊 TTS")
+            res = tg_send_document_bytes(token, uid, "tts.wav", audio, caption="🔊 TTS")
             DB.log_media_request(
                 uid,
                 "groq",
