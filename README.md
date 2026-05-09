@@ -20,6 +20,18 @@ A single Python file (`bot/vds-agent.py`, stdlib only) on a VDS as the `vds-agen
 
 CI (`.github/workflows/deploy.yml`) ships the bot, migrations, migration runner, health-check scripts, and the systemd unit on every push to `main` that touches `bot/**`. `deploy.sh` is a manual fallback that updates only the bot binary.
 
+## Stored data
+
+The bot stores only essential operational data needed for support and provider-compliance diagnostics:
+
+- Telegram `user_id` and username
+- user request/response history and selected provider/model
+- technical request logs (timestamps, token usage, latency, error status)
+
+This is used to identify which user request triggered a provider-side Terms/abuse block and to troubleshoot incidents.
+
+Provider API keys used by the bot are the bot owner’s personal keys. Stored operational data is not sold and is not shared with third parties.
+
 ## Docs
 
 - [CLAUDE.md](CLAUDE.md) — high-level pointers (also linked as `AGENTS.md`).

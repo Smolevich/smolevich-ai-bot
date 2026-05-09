@@ -5,14 +5,13 @@ import logging
 import urllib.request
 import threading
 import sys
-import sqlite3
 import time
 import os
 import shutil
 import subprocess
 import urllib.error
 import shlex
-from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import uuid
@@ -32,9 +31,11 @@ from agent.text import (
     compact_messages_for_provider,
     estimate_tokens,
     sanitize_model_id,
-    split_telegram_text,
     to_telegram_markdown,
 )
+from agent.provider_api import available_providers, fetch_models, load_provider_key, make_opener
+from agent.telegram_api import tg_get_file_bytes, tg_request, tg_send_document_bytes, tg_send_long_text, tg_send_text, multipart_body
+from agent.db import DB
 
 # Version stamp — CI replaces this placeholder before deploy; manual deploys keep "dev".
 # Format: YYYY-MM-DD-<short_sha>
@@ -44,13 +45,13 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger(__name__)
 
 # Per-user in-flight guard: avoid parallel runs for the same chat user.
-_INFLIGHT_USERS = set()
-_INFLIGHT_LOCK = threading.Lock()
-_EXECUTOR = ThreadPoolExecutor(max_workers=10)
-_RUNTIME_STATUS = {}
-_RUNTIME_STATUS_LOCK = threading.Lock()
-_PENDING_STT_USERS = set()
-_PENDING_STT_LOCK = threading.Lock()
+inflightUsers = set()
+inflightUsersLock = threading.Lock()
+executorPool = ThreadPoolExecutor(max_workers=10)
+runtimeStatus = {}
+runtimeStatusLock = threading.Lock()
+pendingSttUsers = set()
+pendingSttUsersLock = threading.Lock()
 
 # --- Tools ---
 def tool_run_in_container(command, uid, allow_network=False):
@@ -96,82 +97,9 @@ def load_bot_token():
     except Exception as e:
         log.error(f"Bot token error: {e}"); return ""
 
-def load_provider_key(provider_name):
-    prov = PROVIDERS.get(provider_name)
-    if not prov:
-        return ""
-    # 1. Try env var
-    env_key = os.environ.get(prov.get("key_env", ""), "").strip()
-    if env_key:
-        return env_key
-    # 2. Fallback to file on disk
-    try:
-        return Path(prov["key_file"]).read_text().strip()
-    except Exception:
-        return ""
-
-def available_providers():
-    return [name for name in PROVIDERS if load_provider_key(name)]
-
 def load_admin():
     try: return int(Path(ADMIN_FILE).read_text().strip())
     except: return None
-
-def fetch_models(provider_name):
-    prov = PROVIDERS.get(provider_name)
-    if not prov: return []
-    try:
-        api_key = load_provider_key(provider_name)
-        headers = {"User-Agent": "Mozilla/5.0"}
-        if provider_name == "openrouter":
-            req = urllib.request.Request(prov["models_url"], headers=headers)
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                return json.loads(resp.read().decode()).get("models", [])
-        else:
-            headers["Authorization"] = f"Bearer {api_key}"
-            req = urllib.request.Request(prov["models_url"], headers=headers)
-            opener = _make_opener(prov.get("proxy", False))
-            with opener.open(req, timeout=10) as resp:
-                data = json.loads(resp.read().decode()).get("data", [])
-                return [{"id": m["id"], "supportsTools": prov["supports_tools"]} for m in data if m.get("id")]
-    except Exception as e:
-        log.error(f"fetch_models({provider_name}): {e}"); return []
-
-def _make_opener(use_proxy):
-    if use_proxy and PROXY_URL:
-        return urllib.request.build_opener(urllib.request.ProxyHandler({"https": PROXY_URL, "http": PROXY_URL}))
-    return urllib.request.build_opener()
-
-def tg_request(token, method, data=None):
-    url = f"https://api.telegram.org/bot{token}/{method}"
-    req = urllib.request.Request(url, json.dumps(data).encode() if data else None, {"Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r: return json.loads(r.read().decode())
-    except urllib.error.HTTPError as e:
-        body = ""
-        try:
-            body = e.read().decode("utf-8", errors="ignore")
-        except Exception:
-            body = ""
-        log.error(f"TG API error ({method}): HTTP {e.code} {e.reason}. Body: {body[:500]}")
-        return {"ok": False, "error_code": e.code, "description": body or str(e)}
-    except Exception as e:
-        log.error(f"TG API error ({method}): {e}"); return {"ok": False}
-
-def tg_send_text(token, chat_id, text, parse_mode=None, reply_markup=None):
-    payload = {"chat_id": chat_id, "text": text}
-    if parse_mode:
-        payload["parse_mode"] = parse_mode
-    if reply_markup:
-        payload["reply_markup"] = reply_markup
-    res = tg_request(token, "sendMessage", payload)
-    if res.get("ok") or not parse_mode:
-        return res
-    desc = (res.get("description") or "").lower()
-    if "can't parse entities" in desc or "can't find end of" in desc:
-        payload.pop("parse_mode", None)
-        return tg_request(token, "sendMessage", payload)
-    return res
 
 def categorize_model_local(model_id):
     mid = (model_id or "").lower()
@@ -188,7 +116,7 @@ def build_models_view(sess, category="text", limit=12):
         category = "text"
     ms = DB.get_recent_models(prov, max_age_sec=600, category=category, limit=limit)
     if not ms:
-        fresh = fetch_models(prov)
+        fresh = fetch_models(prov, log)
         ms = []
         for m in fresh:
             mid = m["id"]
@@ -228,73 +156,7 @@ def build_models_view(sess, category="text", limit=12):
     txt = f"Models ({prov}, {category}):"
     return txt, kb
 
-def tg_send_long_text(token, chat_id, text, parse_mode=None):
-    chunks = split_telegram_text(text)
-    last = {"ok": True}
-    all_ok = True
-    for ch in chunks:
-        # Apply parse_mode to every chunk; tg_send_text retries as plain text on parse failure,
-        # so a single malformed chunk degrades only itself instead of dropping all formatting.
-        last = tg_send_text(token, chat_id, ch, parse_mode=parse_mode)
-        if not last.get("ok"):
-            all_ok = False
-    out = dict(last)
-    out["ok"] = all_ok
-    return out
-
-def _multipart_body(fields, files):
-    boundary = "----WebKitFormBoundary" + uuid.uuid4().hex
-    out = bytearray()
-    for name, value in fields.items():
-        out.extend(f"--{boundary}\r\n".encode())
-        out.extend(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode())
-        out.extend(str(value).encode())
-        out.extend(b"\r\n")
-    for f in files:
-        out.extend(f"--{boundary}\r\n".encode())
-        out.extend(
-            f'Content-Disposition: form-data; name="{f["name"]}"; filename="{f["filename"]}"\r\n'.encode()
-        )
-        out.extend(f'Content-Type: {f.get("content_type", "application/octet-stream")}\r\n\r\n'.encode())
-        out.extend(f["content"])
-        out.extend(b"\r\n")
-    out.extend(f"--{boundary}--\r\n".encode())
-    return boundary, bytes(out)
-
-def tg_send_document_bytes(token, chat_id, filename, content, caption=None):
-    try:
-        url = f"https://api.telegram.org/bot{token}/sendDocument"
-        fields = {"chat_id": str(chat_id)}
-        if caption:
-            fields["caption"] = caption
-        files = [{
-            "name": "document",
-            "filename": filename,
-            "content": content,
-            "content_type": "application/octet-stream",
-        }]
-        boundary, body = _multipart_body(fields, files)
-        req = urllib.request.Request(
-            url,
-            data=body,
-            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
-        )
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            return json.loads(resp.read().decode())
-    except Exception as e:
-        log.error(f"tg_send_document_bytes error: {e}")
-        return {"ok": False, "description": str(e)}
-
-def tg_get_file_bytes(token, file_id):
-    meta = tg_request(token, "getFile", {"file_id": file_id})
-    if not meta.get("ok"):
-        raise RuntimeError(f"getFile failed: {meta}")
-    file_path = meta["result"]["file_path"]
-    url = f"https://api.telegram.org/file/bot{token}/{file_path}"
-    with urllib.request.urlopen(url, timeout=60) as resp:
-        return file_path, resp.read()
-
-def _pick_groq_audio_model(provider, preferred_model, kind):
+def pick_groq_audio_model(provider, preferred_model, kind):
     """Choose Groq audio model from selected model or recent audio health rows."""
     mid = (preferred_model or "").lower()
     if kind == "stt" and any(k in mid for k in ("whisper", "stt", "transcrib")):
@@ -343,7 +205,7 @@ def groq_transcribe_audio(audio_bytes, filename="audio.ogg", language="ru", mode
     elif ext in ("m4a",):
         content_type = "audio/mp4"
     files = [{"name": "file", "filename": fn, "content": audio_bytes, "content_type": content_type}]
-    boundary, body = _multipart_body(fields, files)
+    boundary, body = multipart_body(fields, files)
     req = urllib.request.Request(
         "https://api.groq.com/openai/v1/audio/transcriptions",
         data=body,
@@ -354,7 +216,7 @@ def groq_transcribe_audio(audio_bytes, filename="audio.ogg", language="ru", mode
             "User-Agent": "curl/8.7.1",
         },
     )
-    opener = _make_opener(True)
+    opener = make_opener(True)
     try:
         with opener.open(req, timeout=120) as resp:
             data = json.loads(resp.read().decode())
@@ -386,7 +248,7 @@ def groq_tts(text, model="canopylabs/orpheus-v1-english", voice="autumn"):
             "User-Agent": "curl/8.7.1",
         },
     )
-    opener = _make_opener(True)
+    opener = make_opener(True)
     try:
         with opener.open(req, timeout=120) as resp:
             return resp.read()
@@ -459,380 +321,6 @@ def is_subscribed(token, user_id):
         return res.get("ok") and res["result"].get("status") in ["creator", "administrator", "member"]
     except: return False
 
-class DB:
-    @staticmethod
-    def _connect():
-        conn = sqlite3.connect(DB_FILE, timeout=30)
-        conn.execute("PRAGMA busy_timeout=30000")
-        return conn
-
-    @staticmethod
-    def _with_retry(fn, label, attempts=4):
-        for i in range(attempts):
-            try:
-                return fn()
-            except sqlite3.OperationalError as e:
-                msg = str(e).lower()
-                if ("locked" in msg or "readonly" in msg) and i < attempts - 1:
-                    time.sleep(0.15 * (i + 1))
-                    continue
-                raise
-        return None
-
-    @staticmethod
-    def ensure_schema():
-        try:
-            with DB._connect() as conn:
-                conn.execute("PRAGMA journal_mode=WAL")
-                try:
-                    conn.execute("ALTER TABLE sessions ADD COLUMN tools_enabled INTEGER DEFAULT 1")
-                except Exception:
-                    pass
-                try:
-                    conn.execute("ALTER TABLE sessions ADD COLUMN engine_mode TEXT DEFAULT 'native'")
-                except Exception:
-                    pass
-                try:
-                    conn.execute("ALTER TABLE sessions ADD COLUMN last_session_id TEXT DEFAULT ''")
-                except Exception:
-                    pass
-                try:
-                    conn.execute("ALTER TABLE users ADD COLUMN message_count INTEGER DEFAULT 0")
-                except Exception:
-                    pass
-                try:
-                    conn.execute(
-                        "ALTER TABLE request_log ADD COLUMN mode TEXT DEFAULT 'native'"
-                    )
-                except Exception:
-                    pass
-                try:
-                    conn.execute(
-                        "ALTER TABLE request_log ADD COLUMN delivered INTEGER DEFAULT 0"
-                    )
-                except Exception:
-                    pass
-                try:
-                    conn.execute(
-                        "ALTER TABLE request_log ADD COLUMN request_http_ms INTEGER DEFAULT 0"
-                    )
-                except Exception:
-                    pass
-                conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS media_request_log (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        ts INTEGER,
-                        uid INTEGER,
-                        provider TEXT,
-                        model TEXT,
-                        operation TEXT,
-                        input_size_bytes INTEGER DEFAULT 0,
-                        output_size_bytes INTEGER DEFAULT 0,
-                        latency_ms INTEGER DEFAULT 0,
-                        ok INTEGER DEFAULT 0,
-                        error TEXT
-                    )
-                    """
-                )
-                try:
-                    conn.execute(
-                        """
-                        UPDATE users
-                        SET message_count = (
-                            SELECT COUNT(*)
-                            FROM request_log rl
-                            WHERE rl.uid = users.id
-                        )
-                        WHERE COALESCE(message_count, 0) = 0
-                        """
-                    )
-                except Exception:
-                    pass
-                conn.commit()
-        except Exception as e:
-            log.error(f"DB ensure_schema: {e}")
-
-    @staticmethod
-    def update_and_check(uid, username):
-        try:
-            def _op():
-                with DB._connect() as conn:
-                    res = conn.execute("SELECT is_allowed, COALESCE(message_count, 0) FROM users WHERE id = ?", (uid,)).fetchone()
-                    if res:
-                        conn.execute("UPDATE users SET username = ?, message_count = ? WHERE id = ?",
-                                     (username, (res[1] or 0) + 1, uid))
-                        allowed = res[0] == 1
-                    else:
-                        conn.execute("INSERT INTO users (id, username, is_allowed, prompt_tokens, completion_tokens, message_count) VALUES (?, ?, 0, 0, 0, 1)", (uid, username))
-                        allowed = False
-                    conn.commit()
-                    return allowed
-            return DB._with_retry(_op, "update_and_check")
-        except Exception as e:
-            log.error(f"DB update_and_check: {e}")
-            return False
-    @staticmethod
-    def set_allowed(uid, allowed=True):
-        try:
-            def _op():
-                with DB._connect() as conn:
-                    conn.execute("UPDATE users SET is_allowed = ? WHERE id = ?", (1 if allowed else 0, uid))
-                    conn.commit()
-            DB._with_retry(_op, "set_allowed")
-        except Exception as e:
-            log.error(f"DB set_allowed: {e}")
-    @staticmethod
-    def add_usage(uid, prompt, completion):
-        try:
-            def _op():
-                with DB._connect() as conn:
-                    conn.execute("UPDATE users SET prompt_tokens = prompt_tokens + ?, completion_tokens = completion_tokens + ? WHERE id = ?", (prompt, completion, uid))
-                    conn.commit()
-            DB._with_retry(_op, "add_usage")
-        except Exception as e:
-            log.error(f"DB add_usage: {e}")
-    @staticmethod
-    def get_session(uid):
-        try:
-            with DB._connect() as conn:
-                res = conn.execute("SELECT model, history_json, provider, tools_enabled, engine_mode, COALESCE(last_session_id, '') FROM sessions WHERE user_id = ?", (uid,)).fetchone()
-                if res:
-                    prov = res[2] or PROVIDER_DEFAULT
-                    tools_enabled = (res[3] if len(res) > 3 else None)
-                    if tools_enabled is None:
-                        tools_enabled = 1 if PROVIDERS.get(prov, {}).get("supports_tools", True) else 0
-                    engine_mode = (res[4] if len(res) > 4 else None) or "native"
-                    last_session_id = (res[5] if len(res) > 5 else None) or ""
-                    return {"model": sanitize_model_id(res[0]), "history": json.loads(res[1]), "provider": prov, "tools_enabled": tools_enabled == 1, "engine_mode": engine_mode, "last_session_id": last_session_id}
-                return {"model": PROVIDERS[PROVIDER_DEFAULT]["default_model"], "history": [], "provider": PROVIDER_DEFAULT, "tools_enabled": True, "engine_mode": "native", "last_session_id": ""}
-        except Exception as e:
-            log.error(f"DB get_session: {e}")
-            return {"model": PROVIDERS[PROVIDER_DEFAULT]["default_model"], "history": [], "provider": PROVIDER_DEFAULT, "tools_enabled": True, "engine_mode": "native", "last_session_id": ""}
-    @staticmethod
-    def save_session(uid, model, history, provider=None, tools_enabled=True, engine_mode="native"):
-        try:
-            model = sanitize_model_id(model)
-            def _op():
-                with DB._connect() as conn:
-                    conn.execute(
-                        """
-                        INSERT INTO sessions (user_id, model, history_json, provider, tools_enabled, engine_mode)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                        ON CONFLICT(user_id) DO UPDATE SET
-                            model=excluded.model,
-                            history_json=excluded.history_json,
-                            provider=excluded.provider,
-                            tools_enabled=excluded.tools_enabled,
-                            engine_mode=excluded.engine_mode
-                        """,
-                        (uid, model, json.dumps(history), provider or PROVIDER_DEFAULT, 1 if tools_enabled else 0, engine_mode or "native"),
-                    )
-                    conn.commit()
-            DB._with_retry(_op, "save_session")
-        except Exception as e:
-            log.error(f"DB save_session: {e}")
-    @staticmethod
-    def get_healthy_models(provider, category="text", limit=10):
-        try:
-            with DB._connect() as conn:
-                rows = conn.execute(
-                    "SELECT model_id, latency_ms, supports_tools FROM model_health WHERE provider = ? AND category = ? AND available = 1 ORDER BY latency_ms ASC LIMIT ?",
-                    (provider, category, limit)).fetchall()
-                return [{"id": r[0], "latency_ms": r[1], "supportsTools": r[2] == 1} for r in rows]
-        except Exception as e:
-            log.error(f"DB get_healthy_models: {e}")
-            return []
-    @staticmethod
-    def get_recent_models(provider, max_age_sec=600, category="text", limit=12):
-        try:
-            cutoff = int(time.time()) - max_age_sec
-            with DB._connect() as conn:
-                rows = conn.execute(
-                    "SELECT model_id, latency_ms, available, supports_tools FROM model_health "
-                    "WHERE provider = ? AND category = ? AND last_check >= ? "
-                    "ORDER BY available DESC, latency_ms ASC LIMIT ?",
-                    (provider, category, cutoff, limit)).fetchall()
-                return [{"id": r[0], "latency_ms": r[1] or 0, "available": r[2] == 1, "supportsTools": r[3] == 1} for r in rows]
-        except Exception as e:
-            log.error(f"DB get_recent_models: {e}")
-            return []
-    @staticmethod
-    def get_model_info(provider, model_id):
-        try:
-            with DB._connect() as conn:
-                row = conn.execute(
-                    "SELECT latency_ms, available, supports_tools, category, last_check FROM model_health WHERE provider = ? AND model_id = ?",
-                    (provider, model_id)).fetchone()
-                if row:
-                    return {"latency_ms": row[0], "available": row[1] == 1, "supports_tools": row[2] == 1, "category": row[3], "last_check": row[4]}
-        except Exception as e:
-            log.error(f"DB get_model_info: {e}")
-        return None
-    @staticmethod
-    def log_request(uid, provider, model, prompt_tokens, completion_tokens, finish_reason, tool_calls, error=None, mode="native", request_http_ms=0):
-        try:
-            def _op():
-                with DB._connect() as conn:
-                    cur = conn.execute(
-                        "INSERT INTO request_log (ts, uid, provider, model, prompt_tokens, completion_tokens, finish_reason, tool_calls, error, mode, delivered, request_http_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
-                        (int(time.time()), uid, provider, model, prompt_tokens, completion_tokens, finish_reason, tool_calls, error, mode, int(request_http_ms or 0)))
-                    conn.commit()
-                    return cur.lastrowid
-            return DB._with_retry(_op, "log_request")
-        except Exception as e:
-            log.error(f"DB log_request: {e}")
-            return None
-
-    @staticmethod
-    def log_media_request(uid, provider, model, operation, input_size_bytes=0, output_size_bytes=0, latency_ms=0, ok=False, error=None):
-        try:
-            def _op():
-                with DB._connect() as conn:
-                    cur = conn.execute(
-                        "INSERT INTO media_request_log (ts, uid, provider, model, operation, input_size_bytes, output_size_bytes, latency_ms, ok, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                        (
-                            int(time.time()),
-                            uid,
-                            provider,
-                            model,
-                            operation,
-                            int(input_size_bytes or 0),
-                            int(output_size_bytes or 0),
-                            int(latency_ms or 0),
-                            1 if ok else 0,
-                            (error or "")[:500],
-                        ),
-                    )
-                    conn.commit()
-                    return cur.lastrowid
-            return DB._with_retry(_op, "log_media_request")
-        except Exception as e:
-            log.error(f"DB log_media_request: {e}")
-            return None
-
-    @staticmethod
-    def set_request_delivered(req_id, delivered=True):
-        if not req_id:
-            return
-        try:
-            def _op():
-                with DB._connect() as conn:
-                    conn.execute(
-                        "UPDATE request_log SET delivered = ? WHERE rowid = ?",
-                        (1 if delivered else 0, req_id),
-                    )
-                    conn.commit()
-            DB._with_retry(_op, "set_request_delivered")
-        except Exception as e:
-            log.error(f"DB set_request_delivered: {e}")
-    @staticmethod
-    def get_all_users_stats():
-        try:
-                with DB._connect() as conn:
-                    res = conn.execute("SELECT u.id, u.username, u.is_allowed, COALESCE(u.message_count, 0), u.prompt_tokens, u.completion_tokens FROM users u LEFT JOIN sessions s ON u.id = s.user_id").fetchall()
-                    stats = []
-                    for uid, uname, allowed, msg_count, pt, ct in res:
-                        stats.append({"id": uid, "username": uname, "allowed": allowed == 1, "count": msg_count or 0, "prompt": pt or 0, "completion": ct or 0})
-                    return stats
-        except Exception as e:
-            log.error(f"DB get_all_users_stats: {e}")
-            return []
-
-    @staticmethod
-    def get_top_models(limit=3):
-        try:
-            with DB._connect() as conn:
-                rows = conn.execute(
-                    """
-                    SELECT
-                        provider,
-                        model,
-                        SUM(
-                            CASE
-                                WHEN COALESCE(error, '') = ''
-                                 AND COALESCE(finish_reason, '') NOT IN ('acpx_error', 'acpx_timeout', 'acpx_exception')
-                                THEN 1 ELSE 0
-                            END
-                        ) AS delivered_answers,
-                        COUNT(*) AS total_requests
-                    FROM request_log
-                    GROUP BY provider, model
-                    ORDER BY delivered_answers DESC, total_requests DESC
-                    LIMIT ?
-                    """,
-                    (limit,),
-                ).fetchall()
-                out = []
-                for provider, model, delivered, total in rows:
-                    delivered = delivered or 0
-                    total = total or 0
-                    rate = (delivered / total * 100.0) if total else 0.0
-                    out.append({
-                        "provider": provider,
-                        "model": model,
-                        "delivered": delivered,
-                        "total": total,
-                        "success_rate": rate,
-                    })
-                return out
-        except Exception as e:
-            log.error(f"DB get_top_models: {e}")
-            return []
-
-    @staticmethod
-    def get_top_providers(limit=3):
-        try:
-            with DB._connect() as conn:
-                rows = conn.execute(
-                    """
-                    SELECT
-                        provider,
-                        SUM(
-                            CASE
-                                WHEN COALESCE(error, '') = ''
-                                 AND COALESCE(finish_reason, '') NOT IN ('acpx_error', 'acpx_timeout', 'acpx_exception')
-                                THEN 1 ELSE 0
-                            END
-                        ) AS delivered_answers,
-                        COUNT(*) AS total_requests
-                    FROM request_log
-                    GROUP BY provider
-                    ORDER BY delivered_answers DESC, total_requests DESC
-                    LIMIT ?
-                    """,
-                    (limit,),
-                ).fetchall()
-                out = []
-                for provider, delivered, total in rows:
-                    delivered = delivered or 0
-                    total = total or 0
-                    rate = (delivered / total * 100.0) if total else 0.0
-                    out.append({
-                        "provider": provider,
-                        "delivered": delivered,
-                        "total": total,
-                        "success_rate": rate,
-                    })
-                return out
-        except Exception as e:
-            log.error(f"DB get_top_providers: {e}")
-            return []
-
-    @staticmethod
-    def set_last_session_id(uid, session_id):
-        try:
-            def _op():
-                with DB._connect() as conn:
-                    conn.execute(
-                        "UPDATE sessions SET last_session_id = ? WHERE user_id = ?",
-                        (session_id or "", uid),
-                    )
-                    conn.commit()
-            DB._with_retry(_op, "set_last_session_id")
-        except Exception as e:
-            log.error(f"DB set_last_session_id: {e}")
-
 # --- Logic ---
 def format_wait_time(seconds):
     if seconds < 60: return f"{int(seconds)}s"
@@ -844,7 +332,7 @@ def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tool
     meta = {"finish_reason": None, "tool_calls_total": 0, "error": None, "http_latency_ms": 0}
     roles = [m.get("role", "?") for m in messages]
     log.info(f"ask_llm: model={model} tools={use_tools} proxy={use_proxy} msgs={len(messages)} roles={roles} est_tokens={estimate_tokens(messages)}")
-    opener = _make_opener(use_proxy)
+    opener = make_opener(use_proxy)
     req_headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {api_key}",
@@ -875,7 +363,7 @@ def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tool
                             messages.append(msg)
                             messages.append({"role": "user", "content": "Continue exactly where you left off."})
                             full_content = content
-                            for _cont in range(3):
+                            for contIdx in range(3):
                                 cont_payload = {"model": model, "messages": messages, "max_tokens": 4096}
                                 cont_req = urllib.request.Request(api_url, json.dumps(cont_payload).encode(), req_headers)
                                 try:
@@ -977,13 +465,13 @@ def compact_history(api_url, api_key, model, history, uid, admin_id, use_proxy=F
     sum_text, _, _ = ask_llm(api_url, api_key, model, p, uid=uid, admin_id=admin_id, use_tools=False, use_proxy=use_proxy)
     return [{"role": "system", "content": f"Summary: {sum_text}"}] + keep
 
-def _ensure_dir(path):
+def ensure_dir(path):
     try:
         os.makedirs(path, exist_ok=True)
     except Exception:
         pass
 
-def _acp_agent_for_mode(mode):
+def acp_agent_for_mode(mode):
     m = (mode or "").strip().lower()
     if m in ("claude", "opencode", "pi"):
         return m
@@ -993,15 +481,15 @@ def ask_via_acpx(uid, text, sess):
     try:
         mode_model = sanitize_model_id(sess.get("model") or "")
         mode = sess.get("engine_mode", "native")
-        agent = _acp_agent_for_mode(mode)
+        agent = acp_agent_for_mode(mode)
         # Each request gets its own isolated workspace subdirectory.
         user_dir = os.path.join(SESSIONS_ROOT, str(uid))
-        _ensure_dir(user_dir)
+        ensure_dir(user_dir)
         session_uuid = str(uuid.uuid4())
         DB.set_last_session_id(uid, session_uuid)
         run_id = f"{int(time.time())}_{session_uuid[:8]}"
-        with _RUNTIME_STATUS_LOCK:
-            st = _RUNTIME_STATUS.get(uid, {})
+        with runtimeStatusLock:
+            st = runtimeStatus.get(uid, {})
             st.update({
                 "active": True,
                 "active_session_id": session_uuid,
@@ -1011,9 +499,9 @@ def ask_via_acpx(uid, text, sess):
                 "last_model": mode_model,
                 "last_start_ts": int(time.time()),
             })
-            _RUNTIME_STATUS[uid] = st
+            runtimeStatus[uid] = st
         cwd = os.path.join(user_dir, run_id)
-        _ensure_dir(cwd)
+        ensure_dir(cwd)
         try:
             os.chmod(cwd, 0o777)
         except Exception:
@@ -1035,13 +523,13 @@ def ask_via_acpx(uid, text, sess):
             pass
         # Pi-native provider env vars (pi ignores generic OPENAI_API_KEY for
         # non-OpenAI providers and expects provider-specific keys).
-        _PI_PROVIDER_ENV = {
+        piProviderEnv = {
             "openrouter": "OPENROUTER_API_KEY",
             "groq": "GROQ_API_KEY",
             "cerebras": "CEREBRAS_API_KEY",
             "nvidia": "OPENAI_API_KEY",  # nvidia uses OpenAI-compat
         }
-        for pname, evar in _PI_PROVIDER_ENV.items():
+        for pname, evar in piProviderEnv.items():
             pkey = load_provider_key(pname)
             if pkey:
                 env[evar] = pkey
@@ -1097,9 +585,9 @@ def ask_via_acpx(uid, text, sess):
             "-e", "CLAUDE_CONFIG_DIR=/workspace/.claude-state",
         ]
         # Pass pi-native provider keys into container.
-        for _evar in ("OPENROUTER_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY"):
-            if env.get(_evar):
-                podman_base += ["-e", f"{_evar}={env[_evar]}"]
+        for envVar in ("OPENROUTER_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY"):
+            if env.get(envVar):
+                podman_base += ["-e", f"{envVar}={env[envVar]}"]
         if use_proxy:
             podman_base += [
                 "-e", f"HTTPS_PROXY={PROXY_URL}",
@@ -1122,10 +610,10 @@ def ask_via_acpx(uid, text, sess):
         elif agent == "pi":
             # Pi supports only providers with native env var keys.
             # No custom base URL support, so nvidia and others won't work.
-            _PI_SUPPORTED_PROVIDERS = {"openrouter": "openrouter", "groq": "groq", "cerebras": "cerebras"}
-            pi_prov = _PI_SUPPORTED_PROVIDERS.get(provider)
+            piSupportedProviders = {"openrouter": "openrouter", "groq": "groq", "cerebras": "cerebras"}
+            pi_prov = piSupportedProviders.get(provider)
             if not pi_prov:
-                supported = ", ".join(sorted(_PI_SUPPORTED_PROVIDERS))
+                supported = ", ".join(sorted(piSupportedProviders))
                 return (
                     f"❌ Pi mode does not support provider `{provider}`. "
                     f"Supported: {supported}.\n"
@@ -1155,35 +643,35 @@ def ask_via_acpx(uid, text, sess):
             pass
 
         if r.returncode == 0 and out:
-            with _RUNTIME_STATUS_LOCK:
-                st = _RUNTIME_STATUS.get(uid, {})
+            with runtimeStatusLock:
+                st = runtimeStatus.get(uid, {})
                 st.update({"active": False, "last_ok_ts": int(time.time())})
-                _RUNTIME_STATUS[uid] = st
+                runtimeStatus[uid] = st
             return out, {"prompt_tokens": 0, "completion_tokens": 0}, {"finish_reason": f"acpx_{agent}", "tool_calls_total": 0, "error": None, "session_id": session_uuid}
         msg = err or out or f"acpx prompt failed with exit {r.returncode}"
         msg = f"{msg} [raw: {raw_log}]"
-        with _RUNTIME_STATUS_LOCK:
-            st = _RUNTIME_STATUS.get(uid, {})
+        with runtimeStatusLock:
+            st = runtimeStatus.get(uid, {})
             st.update({"active": False, "last_error_ts": int(time.time())})
-            _RUNTIME_STATUS[uid] = st
+            runtimeStatus[uid] = st
         return f"❌ ACP mode error: {msg[:1200]}", {"prompt_tokens": 0, "completion_tokens": 0}, {"finish_reason": "acpx_error", "tool_calls_total": 0, "error": msg[:200], "session_id": session_uuid}
     except FileNotFoundError:
-        with _RUNTIME_STATUS_LOCK:
-            st = _RUNTIME_STATUS.get(uid, {})
+        with runtimeStatusLock:
+            st = runtimeStatus.get(uid, {})
             st.update({"active": False, "last_error_ts": int(time.time())})
-            _RUNTIME_STATUS[uid] = st
+            runtimeStatus[uid] = st
         return "❌ ACP mode is enabled, but `acpx` is not installed on server yet.", {"prompt_tokens": 0, "completion_tokens": 0}, {"finish_reason": "acpx_missing", "tool_calls_total": 0, "error": "acpx_missing", "session_id": locals().get("session_uuid", "")}
     except subprocess.TimeoutExpired:
-        with _RUNTIME_STATUS_LOCK:
-            st = _RUNTIME_STATUS.get(uid, {})
+        with runtimeStatusLock:
+            st = runtimeStatus.get(uid, {})
             st.update({"active": False, "last_error_ts": int(time.time())})
-            _RUNTIME_STATUS[uid] = st
+            runtimeStatus[uid] = st
         return "❌ ACP mode timed out.", {"prompt_tokens": 0, "completion_tokens": 0}, {"finish_reason": "acpx_timeout", "tool_calls_total": 0, "error": "timeout", "session_id": locals().get("session_uuid", "")}
     except Exception as e:
-        with _RUNTIME_STATUS_LOCK:
-            st = _RUNTIME_STATUS.get(uid, {})
+        with runtimeStatusLock:
+            st = runtimeStatus.get(uid, {})
             st.update({"active": False, "last_error_ts": int(time.time())})
-            _RUNTIME_STATUS[uid] = st
+            runtimeStatus[uid] = st
         return f"❌ ACP mode exception: {e}", {"prompt_tokens": 0, "completion_tokens": 0}, {"finish_reason": "acpx_exception", "tool_calls_total": 0, "error": str(e)[:200], "session_id": locals().get("session_uuid", "")}
 
 def handle_callback(cb, token, admin_id):
@@ -1268,8 +756,8 @@ def handle_command(uid, username, text, token, admin_id):
         sess = DB.get_session(uid)
         DB.save_session(uid, sess["model"], [], provider=sess["provider"], tools_enabled=sess["tools_enabled"], engine_mode=sess.get("engine_mode", "native"))
         DB.set_last_session_id(uid, "")
-        with _RUNTIME_STATUS_LOCK:
-            _RUNTIME_STATUS.pop(uid, None)
+        with runtimeStatusLock:
+            runtimeStatus.pop(uid, None)
         u_dir = os.path.join(SESSIONS_ROOT, str(uid))
         if os.path.exists(u_dir): shutil.rmtree(u_dir); os.makedirs(u_dir)
         tg_request(token, "sendMessage", {"chat_id": uid, "text": "Reset done."})
@@ -1288,10 +776,10 @@ def handle_command(uid, username, text, token, admin_id):
         sess = DB.get_session(uid)
         ctx_tokens = estimate_tokens(sess["history"])
         ctx_pct = int((ctx_tokens / MAX_CONTEXT_TOKENS) * 100) if MAX_CONTEXT_TOKENS else 0
-        with _RUNTIME_STATUS_LOCK:
-            st = dict(_RUNTIME_STATUS.get(uid, {}))
-        with _INFLIGHT_LOCK:
-            inflight = uid in _INFLIGHT_USERS
+        with runtimeStatusLock:
+            st = dict(runtimeStatus.get(uid, {}))
+        with inflightUsersLock:
+            inflight = uid in inflightUsers
         active = "да" if (st.get("active") or inflight) else "нет"
         mode = sess.get("engine_mode", "native")
         sid = st.get("active_session_id") or st.get("last_session_id") or sess.get("last_session_id")
@@ -1356,8 +844,8 @@ def handle_command(uid, username, text, token, admin_id):
         txt = f"🔖 Version: `{__VERSION__}`"
         tg_request(token, "sendMessage", {"chat_id": uid, "text": txt, "parse_mode": "Markdown"})
     elif text.startswith("/stt"):
-        with _PENDING_STT_LOCK:
-            _PENDING_STT_USERS.add(uid)
+        with pendingSttUsersLock:
+            pendingSttUsers.add(uid)
         tg_send_text(token, uid, "🎙 Send voice/audio file now. I'll transcribe it.")
     elif text.startswith("/tts"):
         parts = text.split(maxsplit=1)
@@ -1368,7 +856,7 @@ def handle_command(uid, username, text, token, admin_id):
             t0 = time.time()
             source_text = parts[1].strip()
             sess = DB.get_session(uid)
-            tts_model = _pick_groq_audio_model(sess.get("provider", "groq"), sess.get("model", ""), "tts")
+            tts_model = pick_groq_audio_model(sess.get("provider", "groq"), sess.get("model", ""), "tts")
             audio = groq_tts(source_text, model=tts_model)
             latency_ms = int((time.time() - t0) * 1000)
             res = tg_send_document_bytes(token, uid, "tts.wav", audio, caption="🔊 TTS")
@@ -1389,7 +877,7 @@ def handle_command(uid, username, text, token, admin_id):
             DB.log_media_request(
                 uid,
                 "groq",
-                _pick_groq_audio_model("groq", DB.get_session(uid).get("model", ""), "tts"),
+                pick_groq_audio_model("groq", DB.get_session(uid).get("model", ""), "tts"),
                 "tts",
                 input_size_bytes=len(parts[1].strip().encode("utf-8")) if len(parts) > 1 else 0,
                 output_size_bytes=0,
@@ -1445,8 +933,8 @@ def process_update(upd, token, admin_id):
         # STT path: accept incoming voice/audio/document when either:
         # 1) user explicitly requested /stt, or
         # 2) selected model is an audio/STT model (auto mode).
-        with _PENDING_STT_LOCK:
-            stt_pending = uid in _PENDING_STT_USERS
+        with pendingSttUsersLock:
+            stt_pending = uid in pendingSttUsers
         sess_for_media = DB.get_session(uid)
         model_for_media = (sess_for_media.get("model") or "").lower()
         auto_stt_model = any(k in model_for_media for k in ("whisper", "speech-to-text", "stt"))
@@ -1456,7 +944,7 @@ def process_update(upd, token, admin_id):
                 file_id = media.get("file_id")
                 t0 = time.time()
                 file_path, blob = tg_get_file_bytes(token, file_id)
-                stt_model = _pick_groq_audio_model(
+                stt_model = pick_groq_audio_model(
                     sess_for_media.get("provider", "groq"),
                     sess_for_media.get("model", ""),
                     "stt",
@@ -1482,7 +970,7 @@ def process_update(upd, token, admin_id):
                 DB.log_media_request(
                     uid,
                     "groq",
-                    _pick_groq_audio_model(sess_for_media.get("provider", "groq"), sess_for_media.get("model", ""), "stt"),
+                    pick_groq_audio_model(sess_for_media.get("provider", "groq"), sess_for_media.get("model", ""), "stt"),
                     "stt",
                     input_size_bytes=0,
                     output_size_bytes=0,
@@ -1492,8 +980,8 @@ def process_update(upd, token, admin_id):
                 )
                 tg_send_text(token, uid, f"❌ STT error: {str(e)[:300]}")
             finally:
-                with _PENDING_STT_LOCK:
-                    _PENDING_STT_USERS.discard(uid)
+                with pendingSttUsersLock:
+                    pendingSttUsers.discard(uid)
             return
 
         # Extract text from message or convert location/venue to text.
@@ -1529,11 +1017,11 @@ def process_update(upd, token, admin_id):
                 return
         if text.startswith("/"): return handle_command(uid, username, text, token, admin_id)
 
-        with _INFLIGHT_LOCK:
-            if uid in _INFLIGHT_USERS:
+        with inflightUsersLock:
+            if uid in inflightUsers:
                 tg_send_text(token, uid, "⏳ Previous request is still running. Please wait for it to finish.")
                 return
-            _INFLIGHT_USERS.add(uid)
+            inflightUsers.add(uid)
 
         sess = DB.get_session(uid); hist = sess["history"]; model = sess["model"]; provider = sess["provider"]
         prov = PROVIDERS.get(provider, PROVIDERS[PROVIDER_DEFAULT])
@@ -1582,23 +1070,23 @@ def process_update(upd, token, admin_id):
             if not sid:
                 sid = uuid.uuid4().hex
                 DB.set_last_session_id(uid, sid)
-                with _RUNTIME_STATUS_LOCK:
-                    st_now = dict(_RUNTIME_STATUS.get(uid, {}))
+                with runtimeStatusLock:
+                    st_now = dict(runtimeStatus.get(uid, {}))
                     st_now["last_session_id"] = sid
-                    _RUNTIME_STATUS[uid] = st_now
+                    runtimeStatus[uid] = st_now
         sid_part = f" | sid: {sid[:8]}" if sid else ""
         footer = f"[{provider}/{model_short} | In: {usage['prompt_tokens']} | Out: {usage['completion_tokens']} | Ctx: {estimate_tokens(hist)}/{MAX_CONTEXT_TOKENS}{sid_part}]"
         reply = to_telegram_markdown(ans) + "\n\n" + footer
         send_res = tg_send_long_text(token, uid, reply, parse_mode="Markdown")
         DB.set_request_delivered(req_id, bool(send_res.get("ok")))
-        with _INFLIGHT_LOCK:
-            _INFLIGHT_USERS.discard(uid)
+        with inflightUsersLock:
+            inflightUsers.discard(uid)
     except Exception as e:
         log.error(f"process_update error: {e}", exc_info=True)
         try:
             if 'uid' in locals() and uid is not None:
-                with _INFLIGHT_LOCK:
-                    _INFLIGHT_USERS.discard(uid)
+                with inflightUsersLock:
+                    inflightUsers.discard(uid)
         except Exception:
             pass
 
@@ -1610,7 +1098,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 log.warning(f"Invalid path: {self.path}")
                 self.send_response(403); self.end_headers(); return
             body = self.rfile.read(l).decode(); self.send_response(200); self.end_headers(); self.wfile.write(b"ok")
-            _EXECUTOR.submit(process_update, json.loads(body), t, a)
+            executorPool.submit(process_update, json.loads(body), t, a)
         except Exception as e: log.error(f"Webhook error: {e}")
     def log_message(self, *args): pass
 
