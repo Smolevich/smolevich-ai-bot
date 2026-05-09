@@ -489,7 +489,7 @@ def groq_tts(text):
     payload = {
         "model": "canopylabs/orpheus-v1-english",
         "input": text,
-        "voice": "tara",
+        "voice": "autumn",
         "response_format": "mp3",
     }
     req = urllib.request.Request(
