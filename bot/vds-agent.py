@@ -469,6 +469,7 @@ def analyze_video_detection(api_url, api_key, model, video_bytes, filename="vide
 
 def set_bot_commands(token):
     commands = [
+        {"command": "help", "description": "Show available commands"},
         {"command": "provider", "description": "Select provider"},
         {"command": "models", "description": "Select model"},
         {"command": "top", "description": "Top 3 models/providers by delivered answers"},
@@ -1482,7 +1483,10 @@ def process_update(upd, token, admin_id):
         prov = PROVIDERS.get(provider, PROVIDERS[PROVIDER_DEFAULT])
         api_key = load_provider_key(provider) or load_provider_key(PROVIDER_DEFAULT)
         use_proxy = prov.get("proxy", False)
-        use_tools = sess.get("tools_enabled", True) and prov.get("supports_tools", True)
+        
+        from agent.text import capabilities_for_model
+        model_caps = capabilities_for_model(provider, model)
+        use_tools = sess.get("tools_enabled", True) and prov.get("supports_tools", True) and ("tools" in model_caps)
 
         if estimate_tokens(hist) > MAX_CONTEXT_TOKENS:
             hist = compact_history(prov["url"], api_key, model, hist, uid, admin_id, use_proxy=use_proxy)

@@ -6,10 +6,10 @@ def utf16_len(s: str) -> int:
 
 PATTERN = re.compile(
     r'(?P<pre>```(?:(?P<lang>[a-zA-Z0-9\+\-\#]+)\n)?(?P<pre_code>.*?)```)|'
-    r'(?P<code>`(?P<inline_code>[^`]+)`)|'
-    r'(?P<bold>\*\*(?P<bold_text>[^*]+)\*\*)|'
-    r'(?P<italic>\_(?P<italic_text>[^_]+)\_|\*(?P<italic_text2>[^*]+)\*)|'
-    r'(?P<link>\[(?P<link_text>[^\]]+)\]\((?P<link_url>[^)]+)\))',
+    r'(?P<code>`(?P<inline_code>[^`\n]+)`)|'
+    r'(?P<bold>\*\*(?P<bold_text>[^*\n]+)\*\*)|'
+    r'(?P<italic>\_(?P<italic_text>[^_\n]+)\_|\*(?P<italic_text2>[^*\n]+)\*)|'
+    r'(?P<link>\[(?P<link_text>[^\]\n]+)\]\((?P<link_url>[^)\n]+)\))',
     re.DOTALL
 )
 
