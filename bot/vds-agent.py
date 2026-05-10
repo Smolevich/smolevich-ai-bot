@@ -1484,7 +1484,6 @@ def process_update(upd, token, admin_id):
         api_key = load_provider_key(provider) or load_provider_key(PROVIDER_DEFAULT)
         use_proxy = prov.get("proxy", False)
         
-        from agent.text import capabilities_for_model
         model_caps = capabilities_for_model(provider, model)
         use_tools = sess.get("tools_enabled", True) and prov.get("supports_tools", True) and ("tools" in model_caps)
 
