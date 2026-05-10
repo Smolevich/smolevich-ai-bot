@@ -57,6 +57,12 @@ pendingSttUsersLock = threading.Lock()
 TELEGRAM_BOT_FILE_DOWNLOAD_LIMIT_BYTES = 20 * 1024 * 1024
 STT_PROVIDER = "groq"
 TTS_PROVIDER = "groq"
+STT_DEFAULT_MODEL_BY_PROVIDER = {
+    "groq": "whisper-large-v3-turbo",
+}
+TTS_DEFAULT_MODEL_BY_PROVIDER = {
+    "groq": "playai-tts",
+}
 
 # --- Tools ---
 def tool_run_in_container(command, uid, allow_network=False):
@@ -316,6 +322,113 @@ def groq_tts(text, model="canopylabs/orpheus-v1-english", voice="autumn"):
         except Exception:
             body = ""
         raise RuntimeError(f"HTTP {e.code}: {(body or e.reason)[:400]}")
+
+
+def transcribe_audio_for_provider(provider, audio_bytes, filename, model, language="ru"):
+    prov = PROVIDERS.get(provider, {})
+    api_key = load_provider_key(provider)
+    if not api_key:
+        raise RuntimeError(f"No API key configured for provider {provider}")
+    base_url = (prov.get("url") or "").rsplit("/chat/completions", 1)[0]
+    if not base_url:
+        raise RuntimeError(f"Provider {provider} has no OpenAI-compatible base URL")
+    target_model = model or STT_DEFAULT_MODEL_BY_PROVIDER.get(provider, "")
+    if not target_model:
+        raise RuntimeError(f"No STT model configured for provider {provider}")
+    fields = {
+        "model": target_model,
+        "response_format": "json",
+        "language": language,
+        "temperature": "0",
+    }
+    fn = filename or "audio.ogg"
+    ext = fn.lower().rsplit(".", 1)[-1] if "." in fn else ""
+    if ext == "oga":
+        fn = fn[: -(len(ext))] + "ogg"
+        ext = "ogg"
+    if not ext:
+        fn = f"{fn}.ogg"
+        ext = "ogg"
+    content_type = "application/octet-stream"
+    if ext in ("ogg", "oga"):
+        content_type = "audio/ogg"
+    elif ext in ("mp3",):
+        content_type = "audio/mpeg"
+    elif ext in ("wav",):
+        content_type = "audio/wav"
+    elif ext in ("m4a",):
+        content_type = "audio/mp4"
+    files = [{"name": "file", "filename": fn, "content": audio_bytes, "content_type": content_type}]
+    boundary, body = multipart_body(fields, files)
+    req = urllib.request.Request(
+        f"{base_url}/audio/transcriptions",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Accept": "application/json",
+            "User-Agent": "curl/8.7.1",
+        },
+    )
+    opener = make_opener(prov.get("proxy", False))
+    with opener.open(req, timeout=120) as resp:
+        data = json.loads(resp.read().decode())
+    return (data.get("text") or "").strip(), provider, target_model
+
+
+def tts_for_provider(provider, text, model):
+    prov = PROVIDERS.get(provider, {})
+    api_key = load_provider_key(provider)
+    if not api_key:
+        raise RuntimeError(f"No API key configured for provider {provider}")
+    base_url = (prov.get("url") or "").rsplit("/chat/completions", 1)[0]
+    if not base_url:
+        raise RuntimeError(f"Provider {provider} has no OpenAI-compatible base URL")
+    target_model = model or TTS_DEFAULT_MODEL_BY_PROVIDER.get(provider, "")
+    if not target_model:
+        raise RuntimeError(f"No TTS model configured for provider {provider}")
+    payload = {
+        "model": target_model,
+        "input": text,
+        "voice": "autumn",
+        "response_format": "wav",
+    }
+    req = urllib.request.Request(
+        f"{base_url}/audio/speech",
+        data=json.dumps(payload).encode(),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": "curl/8.7.1",
+        },
+    )
+    opener = make_opener(prov.get("proxy", False))
+    with opener.open(req, timeout=120) as resp:
+        return resp.read(), provider, target_model
+
+
+def transcribe_audio_with_fallback(selected_provider, audio_bytes, filename, model):
+    errors = []
+    for provider in [selected_provider, STT_PROVIDER]:
+        if provider in (None, ""):
+            continue
+        try:
+            return transcribe_audio_for_provider(provider, audio_bytes, filename, model)
+        except Exception as e:
+            errors.append(f"{provider}: {e}")
+    raise RuntimeError("; ".join(errors)[:400])
+
+
+def tts_with_fallback(selected_provider, text, model):
+    errors = []
+    for provider in [selected_provider, TTS_PROVIDER]:
+        if provider in (None, ""):
+            continue
+        try:
+            return tts_for_provider(provider, text, model)
+        except Exception as e:
+            errors.append(f"{provider}: {e}")
+    raise RuntimeError("; ".join(errors)[:400])
 
 def analyze_video_detection(api_url, api_key, model, video_bytes, filename="video.mp4", use_proxy=False):
     mime, _ = mimetypes.guess_type(filename or "")
@@ -963,13 +1076,14 @@ def handle_command(uid, username, text, token, admin_id):
             source_text = parts[1].strip()
             sess = DB.get_session(uid)
             tts_model = sess.get("model", "")
-            audio = groq_tts(source_text, model=tts_model)
+            used_provider = sess.get("provider", PROVIDER_DEFAULT)
+            audio, used_provider, used_model = tts_with_fallback(used_provider, source_text, tts_model)
             latency_ms = int((time.time() - t0) * 1000)
             res = tg_send_document_bytes(token, uid, "tts.wav", audio, caption="🔊 TTS")
             DB.log_media_request(
                 uid,
-                TTS_PROVIDER,
-                tts_model,
+                used_provider,
+                used_model,
                 "tts",
                 input_size_bytes=len(source_text.encode("utf-8")),
                 output_size_bytes=len(audio or b""),
@@ -982,7 +1096,7 @@ def handle_command(uid, username, text, token, admin_id):
         except Exception as e:
             DB.log_media_request(
                 uid,
-                TTS_PROVIDER,
+                sess.get("provider", PROVIDER_DEFAULT),
                 DB.get_session(uid).get("model", ""),
                 "tts",
                 input_size_bytes=len(parts[1].strip().encode("utf-8")) if len(parts) > 1 else 0,
@@ -1167,12 +1281,18 @@ def process_update(upd, token, admin_id):
                 t0 = time.time()
                 file_path, blob = tg_get_file_bytes(token, file_id)
                 stt_model = sess_for_media.get("model", "")
-                transcript = groq_transcribe_audio(blob, filename=os.path.basename(file_path or "audio.ogg"), model=stt_model)
+                used_provider = sess_for_media.get("provider", PROVIDER_DEFAULT)
+                transcript, used_provider, used_model = transcribe_audio_with_fallback(
+                    used_provider,
+                    blob,
+                    os.path.basename(file_path or "audio.ogg"),
+                    stt_model,
+                )
                 latency_ms = int((time.time() - t0) * 1000)
                 DB.log_media_request(
                     uid,
-                    STT_PROVIDER,
-                    stt_model,
+                    used_provider,
+                    used_model,
                     "stt",
                     input_size_bytes=len(blob or b""),
                     output_size_bytes=len((transcript or "").encode("utf-8")),
@@ -1187,7 +1307,7 @@ def process_update(upd, token, admin_id):
             except Exception as e:
                 DB.log_media_request(
                     uid,
-                    STT_PROVIDER,
+                    sess_for_media.get("provider", PROVIDER_DEFAULT),
                     sess_for_media.get("model", ""),
                     "stt",
                     input_size_bytes=0,
