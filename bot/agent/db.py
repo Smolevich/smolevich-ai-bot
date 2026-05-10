@@ -325,7 +325,7 @@ class DB:
                     ORDER BY delivered_answers DESC, total_requests DESC
                     LIMIT ?
                     """,
-                    (),
+                    (int(limit),),
                 ).fetchall()
                 out = []
                 for provider, model, delivered, total in rows:
@@ -367,7 +367,7 @@ class DB:
                     ORDER BY delivered_answers DESC, total_requests DESC
                     LIMIT ?
                     """,
-                    (),
+                    (int(limit),),
                 ).fetchall()
                 out = []
                 for provider, delivered, total in rows:
