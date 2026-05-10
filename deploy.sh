@@ -11,5 +11,8 @@ REMOTE_PATH="/usr/local/bin/vds-agent"
 
 echo "Deploying bot/vds-agent.py -> ${REMOTE}:${REMOTE_PATH}"
 scp "${SCRIPT_DIR}/bot/vds-agent.py" "${REMOTE}:${REMOTE_PATH}"
+echo "Deploying bot/agent/ -> ${REMOTE}:/usr/local/bin/agent/"
+ssh "${REMOTE}" "sudo mkdir -p /usr/local/bin/agent && sudo chown \$USER /usr/local/bin/agent"
+scp -r "${SCRIPT_DIR}/bot/agent/"* "${REMOTE}:/usr/local/bin/agent/"
 ssh "${REMOTE}" "sudo systemctl restart vds-agent && sleep 1 && sudo systemctl is-active vds-agent"
 echo "Done."
