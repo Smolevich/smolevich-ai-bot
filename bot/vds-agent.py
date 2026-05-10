@@ -1088,7 +1088,7 @@ def handle_command(uid, username, text, token, admin_id):
         res = tg_send_text(token, uid, to_telegram_markdown_v2(txt), parse_mode="MarkdownV2")
         log.info(f"/status sendMessage result: ok={res.get('ok')} chat_id={uid} desc={(res.get('description') or '')[:200]}")
     elif text == "/top":
-        tg_send_text(token, uid, to_telegram_markdown_v2(build_top_text()), parse_mode="MarkdownV2")
+        tg_send_text(token, uid, build_top_text())
     elif text.startswith("/model"):
         parts = text.split(maxsplit=1)
         if len(parts) > 1:
@@ -1193,21 +1193,21 @@ def build_top_text():
     if not top_models and not top_providers:
         return "Пока нет данных для топа."
     txt = (
-        "📊 *Top Stats*\n"
-        "score = `success_rate` x log10(total + 1), сортировка по score убыв.\n"
+        "📊 Top Stats\n"
+        "score = success_rate x log10(total + 1), сортировка по score убыв.\n"
         "delivered = успешная доставка ответа пользователю (text + stt/tts)\n\n"
-        "🏆 *Top 3 Models*\n"
+        "🏆 Top 3 Models\n"
     )
     for i, item in enumerate(top_models, start=1):
         txt += (
-            f"{i}. `{item['provider']}/{item['model']}`\n"
-            f"   score: *{item.get('score', 0):.2f}* | delivered: *{item['delivered']}* | total: *{item['total']}* | success: *{item['success_rate']:.1f}%*\n"
+            f"{i}. {item['provider']}/{item['model']}\n"
+            f"   score: {item.get('score', 0):.2f} | delivered: {item['delivered']} | total: {item['total']} | success: {item['success_rate']:.1f}%\n"
         )
-    txt += "\n🏅 *Top 3 Providers*\n"
+    txt += "\n🏅 Top 3 Providers\n"
     for i, item in enumerate(top_providers, start=1):
         txt += (
-            f"{i}. `{item['provider']}`\n"
-            f"   score: *{item.get('score', 0):.2f}* | delivered: *{item['delivered']}* | total: *{item['total']}* | success: *{item['success_rate']:.1f}%*\n"
+            f"{i}. {item['provider']}\n"
+            f"   score: {item.get('score', 0):.2f} | delivered: {item['delivered']} | total: {item['total']} | success: {item['success_rate']:.1f}%\n"
         )
     return txt
 
