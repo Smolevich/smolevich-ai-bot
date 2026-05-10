@@ -1044,11 +1044,23 @@ def process_update(upd, token, admin_id):
         model_caps = capabilities_for_model(sess_for_media.get("provider", PROVIDER_DEFAULT), sess_for_media.get("model", ""))
         auto_stt_model = any(k in model_for_media for k in ("whisper", "speech-to-text", "stt"))
         has_video_detector = "video:detect" in model_caps
-        has_video_payload = ("video" in msg) or ("document" in msg and str((msg.get("document") or {}).get("mime_type", "")).lower().startswith("video/"))
+        has_video_payload = (
+            ("video" in msg)
+            or ("animation" in msg)
+            or ("document" in msg and (
+                str((msg.get("document") or {}).get("mime_type", "")).lower().startswith("video/")
+                or str((msg.get("document") or {}).get("mime_type", "")).lower() == "image/gif"
+            ))
+        )
 
         if has_video_detector and has_video_payload:
             try:
-                media = msg.get("video") or msg.get("document")
+                media = msg.get("video") or msg.get("animation") or msg.get("document")
+                mime_type = str((media or {}).get("mime_type", "")).lower()
+                file_name = str((media or {}).get("file_name", "")).lower()
+                if mime_type == "image/gif" or file_name.endswith(".gif"):
+                    tg_send_text(token, uid, "❌ GIF is not supported for video detection by current provider endpoint. Send MP4/WebM video file.")
+                    return
                 media_size = int(media.get("file_size") or 0)
                 if media_size > TELEGRAM_BOT_FILE_DOWNLOAD_LIMIT_BYTES:
                     limit = format_bytes(TELEGRAM_BOT_FILE_DOWNLOAD_LIMIT_BYTES)
