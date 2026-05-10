@@ -67,9 +67,8 @@ jobs:
               echo "$HF_TOKEN" | sudo tee /etc/socks-monitor/.hf_key >/dev/null
             fi
             sudo systemctl daemon-reload
-            sudo systemctl stop vds-agent
-            sudo yoyo break-lock --database sqlite:////var/lib/telegram-llm-bot.db || true
+            sudo yoyo break-lock --database "sqlite:////var/lib/telegram-llm-bot.db?timeout=60" || true
             sudo /usr/local/bin/migrate_bot_db
-            sudo systemctl start vds-agent
+            sudo systemctl restart vds-agent
             sleep 1
             sudo systemctl is-active vds-agent

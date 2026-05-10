@@ -15,7 +15,7 @@ def apply_migrations():
     if not os.path.exists(db_dir):
         os.makedirs(db_dir, exist_ok=True)
 
-    backend = get_backend(f"sqlite:///{DB_FILE}")
+    backend = get_backend(f"sqlite:///{DB_FILE}?timeout=60")
     migrations = read_migrations(MIGRATIONS_DIR)
     
     if not migrations:
