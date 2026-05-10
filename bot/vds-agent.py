@@ -33,8 +33,8 @@ from agent.text import (
     compact_messages_for_provider,
     estimate_tokens,
     sanitize_model_id,
-    to_telegram_markdown_v2,
 )
+from agent.entities import parse_markdown_to_entities
 from agent.provider_api import available_providers, load_provider_key, make_opener
 from agent.telegram_api import tg_get_file_bytes, tg_request, tg_send_document_bytes, tg_send_long_text, tg_send_text, multipart_body
 from agent.db import DB
@@ -54,6 +54,8 @@ runtimeStatus = {}
 runtimeStatusLock = threading.Lock()
 pendingSttUsers = set()
 pendingSttUsersLock = threading.Lock()
+DEBUG_USERS = set()
+DEBUG_USERS_LOCK = threading.Lock()
 TELEGRAM_BOT_FILE_DOWNLOAD_LIMIT_BYTES = 20 * 1024 * 1024
 STT_PROVIDER = "groq"
 TTS_PROVIDER = "groq"
@@ -478,7 +480,7 @@ def set_bot_commands(token):
         {"command": "tts", "description": "Text-to-speech: /tts your text"},
         {"command": "reset", "description": "Reset chat history"},
         {"command": "feedback", "description": "Send feedback to admin"},
-        {"command": "version", "description": "Show bot version (commit SHA + build date)"},
+        {"command": "debug", "description": "Toggle debug footer"},
     ]
 
     # Telegram command menu may be scoped and language-specific.
@@ -1004,11 +1006,57 @@ def handle_callback(cb, token, admin_id):
             {"text": f"✅ Approve {uid}", "callback_data": f"approve:{uid}"},
             {"text": f"❌ Deny {uid}", "callback_data": f"deny:{uid}"}
         ]]
-        tg_request(token, "sendMessage", {"chat_id": admin_id, "text": to_telegram_markdown_v2(f"🔔 New user {uname} (`{uid}`) wants access."), "parse_mode": "MarkdownV2", "reply_markup": {"inline_keyboard": admin_kb}})
+        txt_parsed, ents = parse_markdown_to_entities(f"🔔 New user {uname} (`{uid}`) wants access.")
+        tg_request(token, "sendMessage", {"chat_id": admin_id, "text": txt_parsed, "entities": ents, "reply_markup": {"inline_keyboard": admin_kb}})
         tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Запрос отправлен админу"})
+    elif data.startswith("set_debug:"):
+        mode = data.split(":", 1)[1]
+        with DEBUG_USERS_LOCK:
+            if mode == "on": DEBUG_USERS.add(uid)
+            elif uid in DEBUG_USERS: DEBUG_USERS.remove(uid)
+        tg_request(token, "editMessageText", {"chat_id": cb["message"]["chat"]["id"], "message_id": cb["message"]["message_id"], "text": f"✅ Debug footer: {mode.upper()}"})
+    elif data.startswith("set_mode:"):
+        mode = data.split(":", 1)[1]
+        sess = DB.get_session(uid)
+        DB.save_session(uid, sess["model"], sess["history"], provider=sess["provider"], tools_enabled=sess["tools_enabled"], engine_mode=mode)
+        tg_request(token, "editMessageText", {"chat_id": cb["message"]["chat"]["id"], "message_id": cb["message"]["message_id"], "text": f"✅ Mode: {mode}"})
+    elif data.startswith("set_tools:"):
+        mode = data.split(":", 1)[1]
+        sess = DB.get_session(uid)
+        enabled = (mode == "on")
+        if enabled and not PROVIDERS.get(sess["provider"], {}).get("supports_tools", True):
+            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": f"❌ Provider {sess['provider']} does not support tools.", "show_alert": True})
+        else:
+            DB.save_session(uid, sess["model"], sess["history"], provider=sess["provider"], tools_enabled=enabled, engine_mode=sess.get("engine_mode", "native"))
+            tg_request(token, "editMessageText", {"chat_id": cb["message"]["chat"]["id"], "message_id": cb["message"]["message_id"], "text": f"✅ Tools: {mode}"})
+    elif data == "reset_context":
+        sess = DB.get_session(uid)
+        DB.save_session(uid, sess["model"], [], provider=sess["provider"], tools_enabled=sess["tools_enabled"], engine_mode=sess.get("engine_mode", "native"))
+        DB.set_last_session_id(uid, "")
+        with runtimeStatusLock:
+            runtimeStatus.pop(uid, None)
+        u_dir = os.path.join(SESSIONS_ROOT, str(uid))
+        if os.path.exists(u_dir): shutil.rmtree(u_dir); os.makedirs(u_dir)
+        tg_request(token, "editMessageText", {"chat_id": cb["message"]["chat"]["id"], "message_id": cb["message"]["message_id"], "text": cb["message"].get("text", "") + "\n\n✅ Context reset done."})
+        tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Reset done."})
 
 def handle_command(uid, username, text, token, admin_id):
-    if text == "/reset":
+    if text == "/start" or text == "/help":
+        txt = (
+            "Привет! Я продвинутый AI-ассистент.\n"
+            "Что я умею:\n"
+            "💬 Общение с моделями текстом и кодом\n"
+            "🛠 Использование инструментов (поиск, выполнение скриптов)\n"
+            "🎙 Распознавание голоса (/stt) и озвучка (/tts)\n\n"
+            "Настройки:\n"
+            "• /provider — выбор платформы\n"
+            "• /models — выбор конкретной модели\n"
+            "• /mode — режим работы (Native, Claude Code и др.)\n"
+            "• /tools — включить/выключить инструменты\n"
+            "• /debug — режим отладки (техническая информация)"
+        )
+        tg_request(token, "sendMessage", {"chat_id": uid, "text": txt})
+    elif text == "/reset":
         sess = DB.get_session(uid)
         DB.save_session(uid, sess["model"], [], provider=sess["provider"], tools_enabled=sess["tools_enabled"], engine_mode=sess.get("engine_mode", "native"))
         DB.set_last_session_id(uid, "")
@@ -1085,7 +1133,8 @@ def handle_command(uid, username, text, token, admin_id):
             f"• Лимиты: {rl_text}\n"
             f"• Версия: `{__VERSION__}`"
         )
-        res = tg_send_text(token, uid, to_telegram_markdown_v2(txt), parse_mode="MarkdownV2")
+        txt_parsed, ents = parse_markdown_to_entities(txt)
+        res = tg_send_text(token, uid, txt_parsed, entities=ents)
         log.info(f"/status sendMessage result: ok={res.get('ok')} chat_id={uid} desc={(res.get('description') or '')[:200]}")
     elif text == "/top":
         tg_send_text(token, uid, build_top_text())
@@ -1095,44 +1144,33 @@ def handle_command(uid, username, text, token, admin_id):
             m = sanitize_model_id(parts[1].strip()); sess = DB.get_session(uid); DB.save_session(uid, m, sess["history"], provider=sess["provider"], tools_enabled=sess["tools_enabled"], engine_mode=sess.get("engine_mode", "native"))
             tg_send_text(token, uid, f"✅ Model: {m}")
     elif text.startswith("/mode"):
-        parts = text.split(maxsplit=1)
         sess = DB.get_session(uid)
-        if len(parts) == 1:
-            tg_send_text(token, uid, f"Mode: {sess.get('engine_mode', 'native')}\nUse: /mode native or /mode claude or /mode opencode or /mode pi")
-        else:
-            mode = parts[1].strip().lower()
-            if mode not in ("native", "claude", "opencode", "pi"):
-                tg_send_text(token, uid, "Use /mode native or /mode claude or /mode opencode or /mode pi")
-                return True
-            DB.save_session(uid, sess["model"], sess["history"], provider=sess["provider"], tools_enabled=sess["tools_enabled"], engine_mode=mode)
-            tg_send_text(token, uid, f"✅ Mode: {mode}")
+        kb = [
+            [{"text": f"{'✅ ' if sess.get('engine_mode', 'native') == 'native' else ''}Native", "callback_data": "set_mode:native"}],
+            [{"text": f"{'✅ ' if sess.get('engine_mode', 'native') == 'claude' else ''}Claude Code", "callback_data": "set_mode:claude"}],
+            [{"text": f"{'✅ ' if sess.get('engine_mode', 'native') == 'opencode' else ''}OpenCode", "callback_data": "set_mode:opencode"}],
+            [{"text": f"{'✅ ' if sess.get('engine_mode', 'native') == 'pi' else ''}Pi", "callback_data": "set_mode:pi"}],
+        ]
+        tg_request(token, "sendMessage", {"chat_id": uid, "text": "Select mode:", "reply_markup": {"inline_keyboard": kb}})
     elif text.startswith("/tools"):
-        parts = text.split(maxsplit=1)
         sess = DB.get_session(uid)
-        if len(parts) == 1:
-            provider_supports_tools = PROVIDERS.get(sess["provider"], {}).get("supports_tools", True)
-            txt = f"Tools: {'on' if sess['tools_enabled'] else 'off'}\nProvider supports tools: {'yes' if provider_supports_tools else 'no'}\nUse: /tools on or /tools off"
-            tg_send_text(token, uid, txt)
-        else:
-            mode = parts[1].strip().lower()
-            if mode not in ("on", "off"):
-                tg_send_text(token, uid, "Use /tools on or /tools off")
-                return True
-            enabled = mode == "on"
-            if enabled and not PROVIDERS.get(sess["provider"], {}).get("supports_tools", True):
-                tg_send_text(token, uid, f"❌ Provider {sess['provider']} does not support tools.")
-                return True
-            DB.save_session(uid, sess["model"], sess["history"], provider=sess["provider"], tools_enabled=enabled, engine_mode=sess.get("engine_mode", "native"))
-            tg_send_text(token, uid, f"✅ Tools: {mode}")
+        kb = [[{"text": f"{'✅ ' if sess.get('tools_enabled', True) else ''}On", "callback_data": "set_tools:on"},
+               {"text": f"{'✅ ' if not sess.get('tools_enabled', True) else ''}Off", "callback_data": "set_tools:off"}]]
+        provider_supports_tools = PROVIDERS.get(sess["provider"], {}).get("supports_tools", True)
+        txt = f"Tools usage:\nProvider supports tools: {'yes' if provider_supports_tools else 'no'}"
+        tg_request(token, "sendMessage", {"chat_id": uid, "text": txt, "reply_markup": {"inline_keyboard": kb}})
     elif text.startswith("/feedback"):
         parts = text.split(maxsplit=1)
         if len(parts) > 1:
             fb = parts[1].strip(); uname = f"@{username}" if username else f"ID: {uid}"
             tg_request(token, "sendMessage", {"chat_id": admin_id, "text": f"📩 Feedback from {uname}: {fb}"})
             tg_request(token, "sendMessage", {"chat_id": uid, "text": "✅ Sent!"})
-    elif text == "/version":
-        txt = f"🔖 Version: `{__VERSION__}`"
-        tg_request(token, "sendMessage", {"chat_id": uid, "text": to_telegram_markdown_v2(txt), "parse_mode": "MarkdownV2"})
+    elif text == "/debug":
+        with DEBUG_USERS_LOCK:
+            is_on = uid in DEBUG_USERS
+        kb = [[{"text": f"{'✅ ' if is_on else ''}On", "callback_data": "set_debug:on"},
+               {"text": f"{'✅ ' if not is_on else ''}Off", "callback_data": "set_debug:off"}]]
+        tg_request(token, "sendMessage", {"chat_id": uid, "text": "Debug footer settings:", "reply_markup": {"inline_keyboard": kb}})
     elif text.startswith("/stt"):
         with pendingSttUsersLock:
             pendingSttUsers.add(uid)
@@ -1142,6 +1180,8 @@ def handle_command(uid, username, text, token, admin_id):
         if len(parts) < 2 or not parts[1].strip():
             tg_send_text(token, uid, "Use: /tts your text")
             return True
+        from agent.telegram_api import tg_send_chat_action
+        tg_send_chat_action(token, uid, action="upload_document")
         try:
             t0 = time.time()
             source_text = parts[1].strip()
@@ -1181,9 +1221,10 @@ def handle_command(uid, username, text, token, admin_id):
         stats = DB.get_all_users_stats(); txt = "👥 *Users:*\n"
         for s in stats:
             role = "👑" if s['id'] == admin_id else ("✅" if s['allowed'] else "❌")
-            uname = (s['username'] or "Unknown").replace("_", "\\_")
+            uname = s['username'] or "Unknown"
             txt += f"• `{s['id']}` (@{uname}): {role} | Msg: {s['count']} | Tkn: {s['prompt']+s['completion']}\n"
-        tg_request(token, "sendMessage", {"chat_id": uid, "text": to_telegram_markdown_v2(txt), "parse_mode": "MarkdownV2"})
+        txt_parsed, ents = parse_markdown_to_entities(txt)
+        tg_request(token, "sendMessage", {"chat_id": uid, "text": txt_parsed, "entities": ents})
     return True
 
 
@@ -1284,6 +1325,8 @@ def process_update(upd, token, admin_id):
                     tg_send_text(token, uid, f"❌ Video is too big for Telegram Bot API download ({got} > {limit}). Send a smaller/compressed file.")
                     return
                 file_id = media.get("file_id")
+                from agent.telegram_api import tg_send_chat_action
+                tg_send_chat_action(token, uid, action="typing")
                 t0 = time.time()
                 file_path, blob = tg_get_file_bytes(token, file_id)
                 prov = PROVIDERS.get(provider, PROVIDERS[PROVIDER_DEFAULT])
@@ -1350,6 +1393,8 @@ def process_update(upd, token, admin_id):
                     tg_send_text(token, uid, f"❌ Audio is too big for Telegram Bot API download ({got} > {limit}). Send a shorter/compressed file.")
                     return
                 file_id = media.get("file_id")
+                from agent.telegram_api import tg_send_chat_action
+                tg_send_chat_action(token, uid, action="typing")
                 t0 = time.time()
                 file_path, blob = tg_get_file_bytes(token, file_id)
                 stt_model = sess_for_media.get("model", "")
@@ -1446,6 +1491,8 @@ def process_update(upd, token, admin_id):
         sys_prompt = f"VDS Agent. Instructions: {role_desc} Environment: Alpine Linux. No 'requests' lib, use 'urllib.request', wget, curl. Use DuckDuckGo (html.duckduckgo.com) if Google fails. Output: Telegram Markdown V2 — use *bold*, _italic_, `inline code`, triple backticks for code blocks, [text](url) for links. Keep formatting simple and valid for Telegram markdown. Be concise — show actual command output, no hypothetical examples, no tables with status, no 'next steps' sections. Just execute and show results. When user sends coordinates [Геолокация: lat, lon], use them for location-based queries (search nearby places, weather, etc.). Always complete your answer fully — never cut off mid-sentence."
 
         mode = sess.get("engine_mode", "native")
+        from agent.telegram_api import tg_send_chat_action
+        tg_send_chat_action(token, uid, action="typing")
         if mode in ("claude", "opencode", "pi"):
             ans, usage, meta = ask_via_acpx(uid, text, sess)
         else:
@@ -1491,9 +1538,19 @@ def process_update(upd, token, admin_id):
                     st_now["last_session_id"] = sid
                     runtimeStatus[uid] = st_now
         sid_part = f" | sid: {sid[:8]}" if sid else ""
-        footer = f"[{provider}/{model_short} | In: {usage['prompt_tokens']} | Out: {usage['completion_tokens']} | Ctx: {estimate_tokens(hist)}/{MAX_CONTEXT_TOKENS}{sid_part}]"
-        reply = to_telegram_markdown_v2(ans) + "\n\n" + to_telegram_markdown_v2(footer)
-        send_res = tg_send_long_text(token, uid, reply, parse_mode="MarkdownV2")
+        raw_reply = ans
+        with DEBUG_USERS_LOCK:
+            is_debug = uid in DEBUG_USERS
+        if is_debug:
+            footer = f"[{provider}/{model_short} | In: {usage['prompt_tokens']} | Out: {usage['completion_tokens']} | Ctx: {estimate_tokens(hist)}/{MAX_CONTEXT_TOKENS}{sid_part}]"
+            raw_reply += f"\n\n_{footer}_"
+            
+        kb = None
+        if estimate_tokens(hist) > MAX_CONTEXT_TOKENS * 0.5:
+            kb = {"inline_keyboard": [[{"text": "🔄 Reset Context", "callback_data": "reset_context"}]]}
+            
+        txt_parsed, ents = parse_markdown_to_entities(raw_reply)
+        send_res = tg_send_long_text(token, uid, txt_parsed, entities=ents, reply_markup=kb)
         DB.set_request_delivered(req_id, bool(send_res.get("ok")))
         with inflightUsersLock:
             inflightUsers.discard(uid)

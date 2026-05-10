@@ -31,34 +31,57 @@ def tg_request(token: str, method: str, data: dict[str, Any] | None = None, log:
         return {"ok": False}
 
 
-def tg_send_text(token: str, chat_id: int, text: str, parse_mode: str | None = None, reply_markup: dict[str, Any] | None = None, log: logging.Logger | None = None) -> dict[str, Any]:
+def tg_send_text(token: str, chat_id: int, text: str, parse_mode: str | None = None, reply_markup: dict[str, Any] | None = None, log: logging.Logger | None = None, entities: list[dict] | None = None) -> dict[str, Any]:
     payload: dict[str, Any] = {"chat_id": chat_id, "text": text}
     if parse_mode:
         payload["parse_mode"] = parse_mode
+    if entities is not None:
+        payload["entities"] = entities
     if reply_markup:
         payload["reply_markup"] = reply_markup
     res = tg_request(token, "sendMessage", payload, log=log)
-    if res.get("ok") or not parse_mode:
+    if res.get("ok") or (not parse_mode and not entities):
         return res
     desc = (res.get("description") or "").lower()
     if "can't parse entities" in desc or "can't find end of" in desc:
         payload.pop("parse_mode", None)
+        payload.pop("entities", None)
         payload["text"] = strip_markdown_v2_escapes(payload.get("text", ""))
         return tg_request(token, "sendMessage", payload, log=log)
     return res
 
 
-def tg_send_long_text(token: str, chat_id: int, text: str, parse_mode: str | None = None, log: logging.Logger | None = None) -> dict[str, Any]:
+def tg_send_long_text(token: str, chat_id: int, text: str, parse_mode: str | None = None, log: logging.Logger | None = None, reply_markup: dict[str, Any] | None = None, entities: list[dict] | None = None) -> dict[str, Any]:
+    if entities is not None:
+        from agent.entities import split_text_with_entities
+        chunks_with_entities = split_text_with_entities(text, entities)
+        last: dict[str, Any] = {"ok": True}
+        all_ok = True
+        for i, (chunk_text, chunk_ents) in enumerate(chunks_with_entities):
+            markup = reply_markup if i == len(chunks_with_entities) - 1 else None
+            last = tg_send_text(token, chat_id, chunk_text, log=log, reply_markup=markup, entities=chunk_ents)
+            if not last.get("ok"):
+                all_ok = False
+        out = dict(last)
+        if not all_ok:
+            out["ok"] = False
+        return out
+    
     chunks = split_telegram_text(text)
-    last: dict[str, Any] = {"ok": True}
+    last = {"ok": True}
     all_ok = True
-    for chunk in chunks:
-        last = tg_send_text(token, chat_id, chunk, parse_mode=parse_mode, log=log)
+    for i, chunk in enumerate(chunks):
+        markup = reply_markup if i == len(chunks) - 1 else None
+        last = tg_send_text(token, chat_id, chunk, parse_mode=parse_mode, log=log, reply_markup=markup)
         if not last.get("ok"):
             all_ok = False
     out = dict(last)
     out["ok"] = all_ok
     return out
+
+
+def tg_send_chat_action(token: str, chat_id: int, action: str = "typing", log: logging.Logger | None = None) -> dict[str, Any]:
+    return tg_request(token, "sendChatAction", {"chat_id": chat_id, "action": action}, log=log)
 
 
 def multipart_body(fields: dict[str, Any], files: list[dict[str, Any]]) -> tuple[str, bytes]:
