@@ -90,6 +90,24 @@ def categorize_model(model_id):
     return "text"
 
 
+def capabilities_for_category(category):
+    if category in ("text", "code"):
+        return "text"
+    if category == "audio":
+        return "audio"
+    if category == "image":
+        return "image"
+    if category == "video":
+        return "video"
+    if category == "embedding":
+        return "embedding"
+    if category == "translation":
+        return "translation"
+    if category == "safety":
+        return "safety"
+    return ""
+
+
 def load_key(provider_name):
     try:
         return Path(PROVIDERS[provider_name]["key_file"]).read_text().strip()
@@ -224,9 +242,9 @@ def check_provider(conn, prov_name, openrouter_delay_sec=OPENROUTER_DELAY_SEC):
             supports_tools = tools_map.get(model_id, prov.get("supports_tools", False))
             effective_available = _carry_or_set_availability(conn, prov_name, model_id, available, rate_limited)
             conn.execute(
-                "INSERT OR REPLACE INTO model_health (provider, model_id, latency_ms, available, supports_tools, category, last_check) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO model_health (provider, model_id, latency_ms, available, supports_tools, category, capabilities, last_check) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (prov_name, model_id, latency, effective_available,
-                 1 if supports_tools else 0, category, now))
+                 1 if supports_tools else 0, category, capabilities_for_category(category), now))
             conn.execute(
                 "INSERT INTO model_health_log (ts, provider, model_id, latency_ms, available, error) VALUES (?, ?, ?, ?, ?, ?)",
                 (now, prov_name, model_id, latency, 1 if available else 0, error))
@@ -265,9 +283,9 @@ def check_provider(conn, prov_name, openrouter_delay_sec=OPENROUTER_DELAY_SEC):
             model_id, latency, available, supports_tools, category, error, rate_limited = future.result()
             effective_available = _carry_or_set_availability(conn, prov_name, model_id, available, rate_limited)
             conn.execute(
-                "INSERT OR REPLACE INTO model_health (provider, model_id, latency_ms, available, supports_tools, category, last_check) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO model_health (provider, model_id, latency_ms, available, supports_tools, category, capabilities, last_check) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (prov_name, model_id, latency, effective_available,
-                 1 if supports_tools else 0, category, now))
+                 1 if supports_tools else 0, category, capabilities_for_category(category), now))
             if category in ("text", "code"):
                 conn.execute(
                     "INSERT INTO model_health_log (ts, provider, model_id, latency_ms, available, error) VALUES (?, ?, ?, ?, ?, ?)",
@@ -303,11 +321,6 @@ def main():
     with sqlite3.connect(DB_FILE, timeout=30) as conn:
         conn.execute("PRAGMA busy_timeout=30000")
         conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("""CREATE TABLE IF NOT EXISTS model_health_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ts INTEGER, provider TEXT, model_id TEXT,
-            latency_ms INTEGER, available INTEGER, error TEXT)""")
-        conn.commit()
         for prov_name in providers_to_check:
             try:
                 check_provider(conn, prov_name, openrouter_delay_sec=args.openrouter_delay)

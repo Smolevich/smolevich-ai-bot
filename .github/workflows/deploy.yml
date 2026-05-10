@@ -29,7 +29,7 @@ jobs:
           username: ${{ secrets.VDS_USER }}
           key: ${{ secrets.VDS_SSH_KEY }}
           passphrase: ${{ secrets.VDS_SSH_PASSPHRASE }}
-          source: bot/vds-agent.py,bot/migrate.py,bot/model-health-check.py,bot/model-audio-check.py,bot/vds-agent.service,bot/migrations,bot/agent
+          source: bot/vds-agent.py,bot/migrate.py,bot/model-health-check.py,bot/model-audio-check.py,bot/model-media-check.py,bot/vds-agent.service,bot/migrations,bot/agent
           target: /tmp/deploy-bot
           strip_components: 1
 
@@ -50,6 +50,7 @@ jobs:
             sudo install -m 0755 /tmp/deploy-bot/migrate.py            /usr/local/bin/migrate_bot_db
             sudo install -m 0755 /tmp/deploy-bot/model-health-check.py /usr/local/bin/model-health-check
             sudo install -m 0755 /tmp/deploy-bot/model-audio-check.py  /usr/local/bin/model-audio-check
+            sudo install -m 0755 /tmp/deploy-bot/model-media-check.py  /usr/local/bin/model-media-check
             sudo install -m 0644 /tmp/deploy-bot/vds-agent.service     /etc/systemd/system/vds-agent.service
             sudo mkdir -p /usr/local/bin/migrations
             sudo cp /tmp/deploy-bot/migrations/*.py /usr/local/bin/migrations/

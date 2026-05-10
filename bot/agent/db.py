@@ -212,11 +212,25 @@ class DB:
     def get_model_info(provider, model_id):
         try:
             with DB.connectDb() as conn:
-                row = conn.execute(
-                    "SELECT latency_ms, available, supports_tools, category, last_check FROM model_health WHERE provider = ? AND model_id = ?",
-                    (provider, model_id)).fetchone()
+                try:
+                    row = conn.execute(
+                        "SELECT latency_ms, available, supports_tools, category, last_check, capabilities FROM model_health WHERE provider = ? AND model_id = ?",
+                        (provider, model_id)).fetchone()
+                except sqlite3.OperationalError:
+                    row = conn.execute(
+                        "SELECT latency_ms, available, supports_tools, category, last_check FROM model_health WHERE provider = ? AND model_id = ?",
+                        (provider, model_id)).fetchone()
                 if row:
-                    return {"latency_ms": row[0], "available": row[1] == 1, "supports_tools": row[2] == 1, "category": row[3], "last_check": row[4]}
+                    info = {
+                        "latency_ms": row[0],
+                        "available": row[1] == 1,
+                        "supports_tools": row[2] == 1,
+                        "category": row[3],
+                        "last_check": row[4],
+                    }
+                    if len(row) > 5:
+                        info["capabilities"] = row[5] or ""
+                    return info
         except Exception as e:
             log.error(f"DB get_model_info: {e}")
         return None

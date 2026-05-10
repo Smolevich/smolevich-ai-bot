@@ -8,7 +8,7 @@ A Telegram bot that gives you one chat interface in front of several LLM provide
 
 - **Multi-provider chat** — switch providers and models on the fly with `/provider` and `/models`.
 - **Code sandbox** — the `execute_bash` tool runs commands inside a per-user Podman container (`acpx-claude:latest`), with persistent workspace volumes per user.
-- **Health checks** — text/code model checks run via `model-health-check` cron; audio checks (STT/TTS) run via separate `model-audio-check` cron.
+- **Health checks** — text/code model checks run via `model-health-check` cron; audio checks (STT/TTS) run via separate `model-audio-check` cron; image/video discovery runs via separate `model-media-check` cron.
 - **Stats** — `/top` and `/status` summarise usage, success rate and per-provider/per-model delivery counts.
 - **Subscription gate** — first-time users are asked to subscribe to a Telegram channel before they get access; admin can approve/deny manually.
 - **Multiple engine modes** — `/mode` toggles between native (direct OpenAI-compatible API call), Claude Code via ACP, opencode, and a "pi" experimental mode.

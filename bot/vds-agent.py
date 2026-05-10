@@ -105,6 +105,10 @@ def categorize_model_local(model_id):
     mid = (model_id or "").lower()
     if any(k in mid for k in ("whisper", "speech", "voice", "tts", "riva-translate", "audio")):
         return "audio"
+    if any(k in mid for k in ("image", "sdxl", "flux", "stable-diffusion", "visual")):
+        return "image"
+    if any(k in mid for k in ("video", "stream", "cosmos")):
+        return "video"
     if any(k in mid for k in ("coder", "codestral", "devstral", "starcoder")):
         return "code"
     return "text"
@@ -114,6 +118,11 @@ def capabilities_for_model(provider, model_id):
     model = (model_id or "").lower()
     caps = []
     info = DB.get_model_info(provider, model_id)
+    db_caps_raw = (info or {}).get("capabilities", "")
+    if db_caps_raw:
+        db_caps = [c.strip() for c in db_caps_raw.split(",") if c.strip()]
+        if db_caps:
+            return db_caps
     category = (info or {}).get("category", "")
     if category in ("text", "code"):
         caps.append("text")
@@ -142,7 +151,7 @@ def capabilities_for_model(provider, model_id):
 def build_models_view(sess, category="text", limit=12):
     prov = sess["provider"]
     category = (category or "text").lower()
-    if category not in ("text", "audio"):
+    if category not in ("text", "audio", "image", "video"):
         category = "text"
     ms = DB.get_recent_models(prov, max_age_sec=600, category=category, limit=limit)
     if not ms:
@@ -151,9 +160,7 @@ def build_models_view(sess, category="text", limit=12):
         for m in fresh:
             mid = m["id"]
             cat = categorize_model_local(mid)
-            if category == "audio" and cat != "audio":
-                continue
-            if category == "text" and cat == "audio":
+            if category != cat:
                 continue
             ms.append({
                 "id": mid,
@@ -164,16 +171,31 @@ def build_models_view(sess, category="text", limit=12):
             if len(ms) >= limit:
                 break
     kb = []
-    toggle_row = [
+    toggle_row_1 = [
         {"text": f"{'✅ ' if category == 'text' else ''}Text", "callback_data": "models_cat:text"},
         {"text": f"{'✅ ' if category == 'audio' else ''}Audio", "callback_data": "models_cat:audio"},
     ]
-    kb.append(toggle_row)
+    toggle_row_2 = [
+        {"text": f"{'✅ ' if category == 'image' else ''}Image", "callback_data": "models_cat:image"},
+        {"text": f"{'✅ ' if category == 'video' else ''}Video", "callback_data": "models_cat:video"},
+    ]
+    kb.append(toggle_row_1)
+    kb.append(toggle_row_2)
     for m in ms[:limit]:
         mid = m["id"]
         latency = m.get("latency_ms") or 0
         available = m.get("available", True)
         tools_icon = "🛠" if m.get("supportsTools") else ""
+        caps = capabilities_for_model(prov, mid)
+        cap_icons = ""
+        if "audio:stt" in caps:
+            cap_icons += "🎙"
+        if "audio:tts" in caps:
+            cap_icons += "🔊"
+        if "image" in caps:
+            cap_icons += "🖼"
+        if "video" in caps:
+            cap_icons += "🎬"
         if available and latency:
             status_icon = "🟢"
         elif available:
@@ -182,7 +204,7 @@ def build_models_view(sess, category="text", limit=12):
             status_icon = "🔴"
         latency_tag = f" {latency}ms" if latency else ""
         label = mid.split("/")[-1] if "/" in mid else mid
-        kb.append([{"text": f"{status_icon}{tools_icon} {label}{latency_tag}", "callback_data": f"set_model:{mid}"}])
+        kb.append([{"text": f"{status_icon}{tools_icon}{cap_icons} {label}{latency_tag}", "callback_data": f"set_model:{mid}"}])
     txt = f"Models ({prov}, {category}):"
     return txt, kb
 

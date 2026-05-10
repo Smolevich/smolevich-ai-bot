@@ -151,6 +151,18 @@ def probe_tts(provider_name, prov, api_key, model_id):
     return int((time.time() - t0) * 1000)
 
 
+def classify_audio_capabilities(model_id):
+    mid = (model_id or "").lower()
+    caps = []
+    if any(k in mid for k in ("whisper", "stt", "transcrib")):
+        caps.append("audio:stt")
+    if any(k in mid for k in ("orpheus", "tts", "speech")):
+        caps.append("audio:tts")
+    if not caps:
+        caps.append("audio")
+    return ",".join(caps)
+
+
 def check_provider(conn, provider_name):
     prov = PROVIDERS[provider_name]
     api_key = load_key(provider_name)
@@ -166,14 +178,15 @@ def check_provider(conn, provider_name):
     now = int(time.time())
     log.info(f"{provider_name}: probing {len(audio_models)} audio models")
     for mid in audio_models:
+        capabilities = classify_audio_capabilities(mid)
         try:
             if any(k in mid.lower() for k in ("whisper", "stt", "transcrib")):
                 latency = probe_stt(provider_name, prov, api_key, mid)
             else:
                 latency = probe_tts(provider_name, prov, api_key, mid)
             conn.execute(
-                "INSERT OR REPLACE INTO model_health (provider, model_id, latency_ms, available, supports_tools, category, last_check) VALUES (?, ?, ?, 1, ?, 'audio', ?)",
-                (provider_name, mid, latency, 1 if prov.get("supports_tools", False) else 0, now),
+                "INSERT OR REPLACE INTO model_health (provider, model_id, latency_ms, available, supports_tools, category, capabilities, last_check) VALUES (?, ?, ?, 1, ?, 'audio', ?, ?)",
+                (provider_name, mid, latency, 1 if prov.get("supports_tools", False) else 0, capabilities, now),
             )
             conn.execute(
                 "INSERT INTO model_health_log (ts, provider, model_id, latency_ms, available, error) VALUES (?, ?, ?, ?, 1, NULL)",
@@ -188,8 +201,8 @@ def check_provider(conn, provider_name):
                 pass
             err = (body or f"HTTP {e.code}")[:300]
             conn.execute(
-                "INSERT OR REPLACE INTO model_health (provider, model_id, latency_ms, available, supports_tools, category, last_check) VALUES (?, ?, 0, 0, ?, 'audio', ?)",
-                (provider_name, mid, 1 if prov.get("supports_tools", False) else 0, now),
+                "INSERT OR REPLACE INTO model_health (provider, model_id, latency_ms, available, supports_tools, category, capabilities, last_check) VALUES (?, ?, 0, 0, ?, 'audio', ?, ?)",
+                (provider_name, mid, 1 if prov.get("supports_tools", False) else 0, capabilities, now),
             )
             conn.execute(
                 "INSERT INTO model_health_log (ts, provider, model_id, latency_ms, available, error) VALUES (?, ?, ?, 0, 0, ?)",
@@ -199,8 +212,8 @@ def check_provider(conn, provider_name):
         except Exception as e:
             err = str(e)[:300]
             conn.execute(
-                "INSERT OR REPLACE INTO model_health (provider, model_id, latency_ms, available, supports_tools, category, last_check) VALUES (?, ?, 0, 0, ?, 'audio', ?)",
-                (provider_name, mid, 1 if prov.get("supports_tools", False) else 0, now),
+                "INSERT OR REPLACE INTO model_health (provider, model_id, latency_ms, available, supports_tools, category, capabilities, last_check) VALUES (?, ?, 0, 0, ?, 'audio', ?, ?)",
+                (provider_name, mid, 1 if prov.get("supports_tools", False) else 0, capabilities, now),
             )
             conn.execute(
                 "INSERT INTO model_health_log (ts, provider, model_id, latency_ms, available, error) VALUES (?, ?, ?, 0, 0, ?)",
@@ -218,11 +231,6 @@ def main():
     with sqlite3.connect(DB_FILE, timeout=30) as conn:
         conn.execute("PRAGMA busy_timeout=30000")
         conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("""CREATE TABLE IF NOT EXISTS model_health_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ts INTEGER, provider TEXT, model_id TEXT,
-            latency_ms INTEGER, available INTEGER, error TEXT)""")
-        conn.commit()
         for p in providers:
             check_provider(conn, p)
 
