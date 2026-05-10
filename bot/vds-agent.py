@@ -33,7 +33,7 @@ from agent.text import (
     compact_messages_for_provider,
     estimate_tokens,
     sanitize_model_id,
-    to_telegram_markdown,
+    to_telegram_markdown_v2,
 )
 from agent.provider_api import available_providers, load_provider_key, make_opener
 from agent.telegram_api import tg_get_file_bytes, tg_request, tg_send_document_bytes, tg_send_long_text, tg_send_text, multipart_body
@@ -1004,7 +1004,7 @@ def handle_callback(cb, token, admin_id):
             {"text": f"✅ Approve {uid}", "callback_data": f"approve:{uid}"},
             {"text": f"❌ Deny {uid}", "callback_data": f"deny:{uid}"}
         ]]
-        tg_request(token, "sendMessage", {"chat_id": admin_id, "text": f"🔔 New user {uname} (`{uid}`) wants access.", "parse_mode": "Markdown", "reply_markup": {"inline_keyboard": admin_kb}})
+        tg_request(token, "sendMessage", {"chat_id": admin_id, "text": to_telegram_markdown_v2(f"🔔 New user {uname} (`{uid}`) wants access."), "parse_mode": "MarkdownV2", "reply_markup": {"inline_keyboard": admin_kb}})
         tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Запрос отправлен админу"})
 
 def handle_command(uid, username, text, token, admin_id):
@@ -1085,10 +1085,10 @@ def handle_command(uid, username, text, token, admin_id):
             f"• Лимиты: {rl_text}\n"
             f"• Версия: `{__VERSION__}`"
         )
-        res = tg_send_text(token, uid, txt, parse_mode="Markdown")
+        res = tg_send_text(token, uid, to_telegram_markdown_v2(txt), parse_mode="MarkdownV2")
         log.info(f"/status sendMessage result: ok={res.get('ok')} chat_id={uid} desc={(res.get('description') or '')[:200]}")
     elif text == "/top":
-        tg_send_text(token, uid, build_top_text(), parse_mode="Markdown")
+        tg_send_text(token, uid, to_telegram_markdown_v2(build_top_text()), parse_mode="MarkdownV2")
     elif text.startswith("/model"):
         parts = text.split(maxsplit=1)
         if len(parts) > 1:
@@ -1132,7 +1132,7 @@ def handle_command(uid, username, text, token, admin_id):
             tg_request(token, "sendMessage", {"chat_id": uid, "text": "✅ Sent!"})
     elif text == "/version":
         txt = f"🔖 Version: `{__VERSION__}`"
-        tg_request(token, "sendMessage", {"chat_id": uid, "text": txt, "parse_mode": "Markdown"})
+        tg_request(token, "sendMessage", {"chat_id": uid, "text": to_telegram_markdown_v2(txt), "parse_mode": "MarkdownV2"})
     elif text.startswith("/stt"):
         with pendingSttUsersLock:
             pendingSttUsers.add(uid)
@@ -1183,7 +1183,7 @@ def handle_command(uid, username, text, token, admin_id):
             role = "👑" if s['id'] == admin_id else ("✅" if s['allowed'] else "❌")
             uname = (s['username'] or "Unknown").replace("_", "\\_")
             txt += f"• `{s['id']}` (@{uname}): {role} | Msg: {s['count']} | Tkn: {s['prompt']+s['completion']}\n"
-        tg_request(token, "sendMessage", {"chat_id": uid, "text": txt, "parse_mode": "Markdown"})
+        tg_request(token, "sendMessage", {"chat_id": uid, "text": to_telegram_markdown_v2(txt), "parse_mode": "MarkdownV2"})
     return True
 
 
@@ -1443,7 +1443,7 @@ def process_update(upd, token, admin_id):
             hist = compact_history(prov["url"], api_key, model, hist, uid, admin_id, use_proxy=use_proxy)
 
         role_desc = "You are an ADMIN with full internet access." if uid == admin_id else "You are a USER. Internet restricted."
-        sys_prompt = f"VDS Agent. Instructions: {role_desc} Environment: Alpine Linux. No 'requests' lib, use 'urllib.request', wget, curl. Use DuckDuckGo (html.duckduckgo.com) if Google fails. Output: Telegram Markdown V1 — *bold* (single asterisk, NEVER double), _italic_, `inline code`, triple backticks for code blocks, [text](url) for links. Do NOT use **double asterisks** — Telegram does not render them. Do NOT use # headers — bold the line instead. Be concise — show actual command output, no hypothetical examples, no tables with status, no 'next steps' sections. Just execute and show results. When user sends coordinates [Геолокация: lat, lon], use them for location-based queries (search nearby places, weather, etc.). Always complete your answer fully — never cut off mid-sentence."
+        sys_prompt = f"VDS Agent. Instructions: {role_desc} Environment: Alpine Linux. No 'requests' lib, use 'urllib.request', wget, curl. Use DuckDuckGo (html.duckduckgo.com) if Google fails. Output: Telegram Markdown V2 — use *bold*, _italic_, `inline code`, triple backticks for code blocks, [text](url) for links. Keep formatting simple and valid for Telegram markdown. Be concise — show actual command output, no hypothetical examples, no tables with status, no 'next steps' sections. Just execute and show results. When user sends coordinates [Геолокация: lat, lon], use them for location-based queries (search nearby places, weather, etc.). Always complete your answer fully — never cut off mid-sentence."
 
         mode = sess.get("engine_mode", "native")
         if mode in ("claude", "opencode", "pi"):
@@ -1492,8 +1492,8 @@ def process_update(upd, token, admin_id):
                     runtimeStatus[uid] = st_now
         sid_part = f" | sid: {sid[:8]}" if sid else ""
         footer = f"[{provider}/{model_short} | In: {usage['prompt_tokens']} | Out: {usage['completion_tokens']} | Ctx: {estimate_tokens(hist)}/{MAX_CONTEXT_TOKENS}{sid_part}]"
-        reply = to_telegram_markdown(ans) + "\n\n" + footer
-        send_res = tg_send_long_text(token, uid, reply, parse_mode="Markdown")
+        reply = to_telegram_markdown_v2(ans) + "\n\n" + to_telegram_markdown_v2(footer)
+        send_res = tg_send_long_text(token, uid, reply, parse_mode="MarkdownV2")
         DB.set_request_delivered(req_id, bool(send_res.get("ok")))
         with inflightUsersLock:
             inflightUsers.discard(uid)
