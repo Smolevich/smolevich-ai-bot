@@ -5,6 +5,7 @@ from typing import Any
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 MDV2_ESCAPE_RE = re.compile(r"([_*\[\]()~`>#+\-=|{}.!\\])")
+MDV2_UNESCAPE_RE = re.compile(r"\\([_*\[\]()~`>#+\-=|{}.!\\])")
 
 
 def estimate_tokens(messages: list[dict[str, Any]]) -> int:
@@ -136,3 +137,9 @@ def to_telegram_markdown_v2(text: str) -> str:
     for i, raw in enumerate(tokens):
         value = value.replace(f"\x00{i}\x00", raw)
     return value
+
+
+def strip_markdown_v2_escapes(text: str) -> str:
+    if not text:
+        return text
+    return MDV2_UNESCAPE_RE.sub(r"\1", text)

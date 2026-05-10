@@ -7,7 +7,7 @@ import urllib.request
 import uuid
 from typing import Any
 
-from agent.text import split_telegram_text
+from agent.text import split_telegram_text, strip_markdown_v2_escapes
 
 
 def tg_request(token: str, method: str, data: dict[str, Any] | None = None, log: logging.Logger | None = None) -> dict[str, Any]:
@@ -43,6 +43,7 @@ def tg_send_text(token: str, chat_id: int, text: str, parse_mode: str | None = N
     desc = (res.get("description") or "").lower()
     if "can't parse entities" in desc or "can't find end of" in desc:
         payload.pop("parse_mode", None)
+        payload["text"] = strip_markdown_v2_escapes(payload.get("text", ""))
         return tg_request(token, "sendMessage", payload, log=log)
     return res
 
@@ -103,4 +104,3 @@ def tg_get_file_bytes(token: str, file_id: str, log: logging.Logger | None = Non
     url = f"https://api.telegram.org/file/bot{token}/{file_path}"
     with urllib.request.urlopen(url, timeout=60) as resp:
         return file_path, resp.read()
-
