@@ -55,6 +55,8 @@ runtimeStatusLock = threading.Lock()
 pendingSttUsers = set()
 pendingSttUsersLock = threading.Lock()
 TELEGRAM_BOT_FILE_DOWNLOAD_LIMIT_BYTES = 20 * 1024 * 1024
+STT_PROVIDER = "groq"
+TTS_PROVIDER = "groq"
 
 # --- Tools ---
 def tool_run_in_container(command, uid, allow_network=False):
@@ -232,7 +234,7 @@ def build_models_view(sess, category="text", limit=12):
     return txt, kb
 
 def groq_transcribe_audio(audio_bytes, filename="audio.ogg", language="ru", model="whisper-large-v3-turbo"):
-    api_key = load_provider_key("groq")
+    api_key = load_provider_key(STT_PROVIDER)
     if not api_key:
         raise RuntimeError("No GROQ API key configured")
     fields = {
@@ -285,7 +287,7 @@ def groq_transcribe_audio(audio_bytes, filename="audio.ogg", language="ru", mode
     return (data.get("text") or "").strip()
 
 def groq_tts(text, model="canopylabs/orpheus-v1-english", voice="autumn"):
-    api_key = load_provider_key("groq")
+    api_key = load_provider_key(TTS_PROVIDER)
     if not api_key:
         raise RuntimeError("No GROQ API key configured")
     payload = {
@@ -966,7 +968,7 @@ def handle_command(uid, username, text, token, admin_id):
             res = tg_send_document_bytes(token, uid, "tts.wav", audio, caption="🔊 TTS")
             DB.log_media_request(
                 uid,
-                "groq",
+                TTS_PROVIDER,
                 tts_model,
                 "tts",
                 input_size_bytes=len(source_text.encode("utf-8")),
@@ -980,7 +982,7 @@ def handle_command(uid, username, text, token, admin_id):
         except Exception as e:
             DB.log_media_request(
                 uid,
-                "groq",
+                TTS_PROVIDER,
                 DB.get_session(uid).get("model", ""),
                 "tts",
                 input_size_bytes=len(parts[1].strip().encode("utf-8")) if len(parts) > 1 else 0,
@@ -1150,7 +1152,7 @@ def process_update(upd, token, admin_id):
                     got = format_bytes(media_size)
                     DB.log_media_request(
                         uid,
-                        "groq",
+                        STT_PROVIDER,
                         sess_for_media.get("model", ""),
                         "stt",
                         input_size_bytes=media_size,
@@ -1169,7 +1171,7 @@ def process_update(upd, token, admin_id):
                 latency_ms = int((time.time() - t0) * 1000)
                 DB.log_media_request(
                     uid,
-                    "groq",
+                    STT_PROVIDER,
                     stt_model,
                     "stt",
                     input_size_bytes=len(blob or b""),
@@ -1185,7 +1187,7 @@ def process_update(upd, token, admin_id):
             except Exception as e:
                 DB.log_media_request(
                     uid,
-                    "groq",
+                    STT_PROVIDER,
                     sess_for_media.get("model", ""),
                     "stt",
                     input_size_bytes=0,
