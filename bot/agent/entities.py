@@ -8,7 +8,7 @@ PATTERN = re.compile(
     r'(?P<pre>```(?:(?P<lang>[a-zA-Z0-9\+\-\#]+)\n)?(?P<pre_code>.*?)```)|'
     r'(?P<code>`(?P<inline_code>[^`\n]+)`)|'
     r'(?P<bold>\*\*(?P<bold_text>[^*\n]+)\*\*)|'
-    r'(?P<italic>\_(?P<italic_text>[^_\n]+)\_|\*(?P<italic_text2>[^*\n]+)\*)|'
+    r'(?P<italic>\*(?P<italic_text>[^*\n]+)\*)|'
     r'(?P<link>\[(?P<link_text>[^\]\n]+)\]\((?P<link_url>[^)\n]+)\))',
     re.DOTALL
 )
