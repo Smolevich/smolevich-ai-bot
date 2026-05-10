@@ -54,6 +54,7 @@ runtimeStatus = {}
 runtimeStatusLock = threading.Lock()
 pendingSttUsers = set()
 pendingSttUsersLock = threading.Lock()
+TELEGRAM_BOT_FILE_DOWNLOAD_LIMIT_BYTES = 20 * 1024 * 1024
 
 # --- Tools ---
 def tool_run_in_container(command, uid, allow_network=False):
@@ -414,6 +415,13 @@ def format_wait_time(seconds):
     if seconds < 60: return f"{int(seconds)}s"
     if seconds < 3600: return f"{int(seconds // 60)}m {int(seconds % 60)}s"
     return f"{int(seconds // 3600)}h {int((seconds % 3600) // 60)}m"
+
+def format_bytes(size: int) -> str:
+    if size < 1024:
+        return f"{size} B"
+    if size < 1024 * 1024:
+        return f"{size / 1024:.1f} KB"
+    return f"{size / (1024 * 1024):.1f} MB"
 
 def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tools=True, use_proxy=False):
     usage = {"prompt_tokens": 0, "completion_tokens": 0}
@@ -1041,6 +1049,23 @@ def process_update(upd, token, admin_id):
         if has_video_detector and has_video_payload:
             try:
                 media = msg.get("video") or msg.get("document")
+                media_size = int(media.get("file_size") or 0)
+                if media_size > TELEGRAM_BOT_FILE_DOWNLOAD_LIMIT_BYTES:
+                    limit = format_bytes(TELEGRAM_BOT_FILE_DOWNLOAD_LIMIT_BYTES)
+                    got = format_bytes(media_size)
+                    DB.log_media_request(
+                        uid,
+                        sess_for_media.get("provider", PROVIDER_DEFAULT),
+                        sess_for_media.get("model", ""),
+                        "video_detect",
+                        input_size_bytes=media_size,
+                        output_size_bytes=0,
+                        latency_ms=0,
+                        ok=False,
+                        error=f"file_too_big:{media_size}",
+                    )
+                    tg_send_text(token, uid, f"❌ Video is too big for Telegram Bot API download ({got} > {limit}). Send a smaller/compressed file.")
+                    return
                 file_id = media.get("file_id")
                 t0 = time.time()
                 file_path, blob = tg_get_file_bytes(token, file_id)
@@ -1091,6 +1116,23 @@ def process_update(upd, token, admin_id):
         if (stt_pending or auto_stt_model) and ("voice" in msg or "audio" in msg or "document" in msg):
             try:
                 media = msg.get("voice") or msg.get("audio") or msg.get("document")
+                media_size = int(media.get("file_size") or 0)
+                if media_size > TELEGRAM_BOT_FILE_DOWNLOAD_LIMIT_BYTES:
+                    limit = format_bytes(TELEGRAM_BOT_FILE_DOWNLOAD_LIMIT_BYTES)
+                    got = format_bytes(media_size)
+                    DB.log_media_request(
+                        uid,
+                        "groq",
+                        sess_for_media.get("model", ""),
+                        "stt",
+                        input_size_bytes=media_size,
+                        output_size_bytes=0,
+                        latency_ms=0,
+                        ok=False,
+                        error=f"file_too_big:{media_size}",
+                    )
+                    tg_send_text(token, uid, f"❌ Audio is too big for Telegram Bot API download ({got} > {limit}). Send a shorter/compressed file.")
+                    return
                 file_id = media.get("file_id")
                 t0 = time.time()
                 file_path, blob = tg_get_file_bytes(token, file_id)
