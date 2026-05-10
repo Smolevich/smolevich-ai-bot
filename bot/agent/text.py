@@ -3,7 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
-_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+MDV2_ESCAPE_RE = re.compile(r"([_*\[\]()~`>#+\-=|{}.!\\])")
 
 
 def estimate_tokens(messages: list[dict[str, Any]]) -> int:
@@ -26,7 +27,7 @@ def compact_messages_for_provider(messages: list[dict[str, Any]], keep_recent: i
 
 def sanitize_model_id(model: str | None) -> str:
     value = str(model or "")
-    value = _ANSI_RE.sub("", value)
+    value = ANSI_RE.sub("", value)
     value = "".join(ch for ch in value if ch.isprintable())
     return value.strip()
 
@@ -94,3 +95,44 @@ def split_telegram_text(text: str, max_len: int = 3500) -> list[str]:
         parts.append(buf)
     return parts
 
+
+def to_telegram_markdown_v2(text: str) -> str:
+    """Convert markdown-ish text to Telegram-safe MarkdownV2.
+
+    Keeps a small subset of formatting (`*bold*`, `_italic_`, inline links, inline/fenced code)
+    and escapes everything else required by Telegram MarkdownV2.
+    """
+    if not text:
+        return text
+
+    value = to_telegram_markdown(text)
+    tokens: list[str] = []
+
+    def put_token(raw: str) -> str:
+        tokens.append(raw)
+        return f"\x00{len(tokens)-1}\x00"
+
+    # Protect fenced code blocks first.
+    value = re.sub(r"```[\s\S]*?```", lambda m: put_token(m.group(0)), value)
+    # Protect inline code.
+    value = re.sub(r"`[^`\n]+`", lambda m: put_token(m.group(0)), value)
+
+    # Protect inline links.
+    def protect_link(match: re.Match[str]) -> str:
+        label = MDV2_ESCAPE_RE.sub(r"\\\1", match.group(1))
+        url = match.group(2).replace("\\", "\\\\").replace(")", "\\)")
+        return put_token(f"[{label}]({url})")
+
+    value = re.sub(r"\[([^\]\n]+)\]\((https?://[^\s)]+)\)", protect_link, value)
+
+    # Protect basic emphasis. Require at least one word char to avoid list bullets.
+    value = re.sub(r"(?<!\*)\*([^\n*]*\w[^\n*]*)\*(?!\*)", lambda m: put_token(f"*{m.group(1)}*"), value)
+    value = re.sub(r"(?<!_)_([^\n_]*\w[^\n_]*)_(?!_)", lambda m: put_token(f"_{m.group(1)}_"), value)
+
+    # Escape everything else for MarkdownV2.
+    value = MDV2_ESCAPE_RE.sub(r"\\\1", value)
+
+    # Restore protected tokens.
+    for i, raw in enumerate(tokens):
+        value = value.replace(f"\x00{i}\x00", raw)
+    return value

@@ -7,6 +7,8 @@ import threading
 import sys
 import time
 import os
+import base64
+import mimetypes
 import shutil
 import subprocess
 import urllib.error
@@ -33,7 +35,7 @@ from agent.text import (
     sanitize_model_id,
     to_telegram_markdown,
 )
-from agent.provider_api import available_providers, fetch_models, load_provider_key, make_opener
+from agent.provider_api import available_providers, load_provider_key, make_opener
 from agent.telegram_api import tg_get_file_bytes, tg_request, tg_send_document_bytes, tg_send_long_text, tg_send_text, multipart_body
 from agent.db import DB
 
@@ -105,13 +107,34 @@ def categorize_model_local(model_id):
     mid = (model_id or "").lower()
     if any(k in mid for k in ("whisper", "speech", "voice", "tts", "riva-translate", "audio")):
         return "audio"
-    if any(k in mid for k in ("image", "sdxl", "flux", "stable-diffusion", "visual")):
+    if any(k in mid for k in ("image", "sdxl", "flux", "stable-diffusion", "visual")) and is_media_generation_model(mid):
         return "image"
-    if any(k in mid for k in ("video", "stream", "cosmos")):
+    if any(k in mid for k in ("video", "stream", "cosmos")) and is_media_generation_model(mid):
         return "video"
     if any(k in mid for k in ("coder", "codestral", "devstral", "starcoder")):
         return "code"
     return "text"
+
+def is_media_generation_model(model_id: str) -> bool:
+    mid = (model_id or "").lower()
+    reject = (
+        "detector",
+        "detection",
+        "classifier",
+        "classification",
+        "moderation",
+        "safety",
+        "nsfw",
+        "segment",
+        "ocr",
+        "recognition",
+        "synthetic-video-detector",
+    )
+    return not any(k in mid for k in reject)
+
+def is_video_detection_model(model_id: str) -> bool:
+    mid = (model_id or "").lower()
+    return any(k in mid for k in ("detector", "detection", "classifier", "classification", "synthetic-video-detector"))
 
 
 def capabilities_for_model(provider, model_id):
@@ -120,9 +143,7 @@ def capabilities_for_model(provider, model_id):
     info = DB.get_model_info(provider, model_id)
     db_caps_raw = (info or {}).get("capabilities", "")
     if db_caps_raw:
-        db_caps = [c.strip() for c in db_caps_raw.split(",") if c.strip()]
-        if db_caps:
-            return db_caps
+        caps.extend([c.strip() for c in db_caps_raw.split(",") if c.strip()])
     category = (info or {}).get("category", "")
     if category in ("text", "code"):
         caps.append("text")
@@ -133,10 +154,12 @@ def capabilities_for_model(provider, model_id):
             caps.append("audio:tts")
         if "audio:stt" not in caps and "audio:tts" not in caps:
             caps.append("audio")
-    if category == "image" or any(k in model for k in ("image", "sdxl", "flux", "stable-diffusion")):
+    if (category == "image" or any(k in model for k in ("image", "sdxl", "flux", "stable-diffusion"))) and is_media_generation_model(model):
         caps.append("image")
-    if category == "video" or "video" in model:
+    if (category == "video" or "video" in model) and is_media_generation_model(model):
         caps.append("video")
+    if category == "video" and is_video_detection_model(model):
+        caps.append("video:detect")
     if not caps:
         caps.append(categorize_model_local(model_id))
     # Deduplicate preserving order.
@@ -151,25 +174,18 @@ def capabilities_for_model(provider, model_id):
 def build_models_view(sess, category="text", limit=12):
     prov = sess["provider"]
     category = (category or "text").lower()
-    if category not in ("text", "audio", "image", "video"):
+    if category not in ("text", "audio", "image", "video", "video_detect"):
         category = "text"
-    ms = DB.get_recent_models(prov, max_age_sec=600, category=category, limit=limit)
+    db_category = "video" if category == "video_detect" else category
+    # For /models we must be deterministic and fast: use only DB cache, never provider network fetches.
+    ms = DB.get_recent_models(prov, max_age_sec=1800, category=db_category, limit=max(limit * 3, 30))
     if not ms:
-        fresh = fetch_models(prov, log)
-        ms = []
-        for m in fresh:
-            mid = m["id"]
-            cat = categorize_model_local(mid)
-            if category != cat:
-                continue
-            ms.append({
-                "id": mid,
-                "latency_ms": 0,
-                "available": True,
-                "supportsTools": bool(m.get("supportsTools")),
-            })
-            if len(ms) >= limit:
-                break
+        ms = DB.get_healthy_models(prov, category=db_category, limit=max(limit * 3, 30))
+    if category in ("image", "video"):
+        ms = [m for m in ms if is_media_generation_model(m.get("id", ""))]
+    elif category == "video_detect":
+        ms = [m for m in ms if is_video_detection_model(m.get("id", ""))]
+    ms = ms[:limit]
     kb = []
     toggle_row_1 = [
         {"text": f"{'✅ ' if category == 'text' else ''}Text", "callback_data": "models_cat:text"},
@@ -179,9 +195,13 @@ def build_models_view(sess, category="text", limit=12):
         {"text": f"{'✅ ' if category == 'image' else ''}Image", "callback_data": "models_cat:image"},
         {"text": f"{'✅ ' if category == 'video' else ''}Video", "callback_data": "models_cat:video"},
     ]
+    toggle_row_3 = [
+        {"text": f"{'✅ ' if category == 'video_detect' else ''}VideoDetect", "callback_data": "models_cat:video_detect"},
+    ]
     kb.append(toggle_row_1)
     kb.append(toggle_row_2)
-    for m in ms[:limit]:
+    kb.append(toggle_row_3)
+    for m in ms:
         mid = m["id"]
         latency = m.get("latency_ms") or 0
         available = m.get("available", True)
@@ -196,6 +216,8 @@ def build_models_view(sess, category="text", limit=12):
             cap_icons += "🖼"
         if "video" in caps:
             cap_icons += "🎬"
+        if "video:detect" in caps:
+            cap_icons += "🕵️"
         if available and latency:
             status_icon = "🟢"
         elif available:
@@ -291,6 +313,40 @@ def groq_tts(text, model="canopylabs/orpheus-v1-english", voice="autumn"):
         except Exception:
             body = ""
         raise RuntimeError(f"HTTP {e.code}: {(body or e.reason)[:400]}")
+
+def analyze_video_detection(api_url, api_key, model, video_bytes, filename="video.mp4", use_proxy=False):
+    mime, _ = mimetypes.guess_type(filename or "")
+    if not mime:
+        mime = "video/mp4"
+    b64 = base64.b64encode(video_bytes or b"").decode("ascii")
+    data_url = f"data:{mime};base64,{b64}"
+    payload = {
+        "model": model,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Analyze this video and say whether it is AI-generated/synthetic. Return short conclusion and confidence."},
+                    {"type": "input_video", "video_url": data_url},
+                ],
+            }
+        ],
+        "max_tokens": 512,
+    }
+    req = urllib.request.Request(
+        api_url,
+        data=json.dumps(payload).encode(),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "curl/8.7.1",
+        },
+    )
+    opener = make_opener(use_proxy)
+    with opener.open(req, timeout=180) as resp:
+        data = json.loads(resp.read().decode())
+    return (data.get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
 
 
 def set_bot_commands(token):
@@ -977,7 +1033,61 @@ def process_update(upd, token, admin_id):
             stt_pending = uid in pendingSttUsers
         sess_for_media = DB.get_session(uid)
         model_for_media = (sess_for_media.get("model") or "").lower()
+        model_caps = capabilities_for_model(sess_for_media.get("provider", PROVIDER_DEFAULT), sess_for_media.get("model", ""))
         auto_stt_model = any(k in model_for_media for k in ("whisper", "speech-to-text", "stt"))
+        has_video_detector = "video:detect" in model_caps
+        has_video_payload = ("video" in msg) or ("document" in msg and str((msg.get("document") or {}).get("mime_type", "")).lower().startswith("video/"))
+
+        if has_video_detector and has_video_payload:
+            try:
+                media = msg.get("video") or msg.get("document")
+                file_id = media.get("file_id")
+                t0 = time.time()
+                file_path, blob = tg_get_file_bytes(token, file_id)
+                provider = sess_for_media.get("provider", PROVIDER_DEFAULT)
+                prov = PROVIDERS.get(provider, PROVIDERS[PROVIDER_DEFAULT])
+                api_key = load_provider_key(provider) or load_provider_key(PROVIDER_DEFAULT)
+                if not api_key:
+                    raise RuntimeError(f"No API key configured for provider {provider}")
+                analysis = analyze_video_detection(
+                    prov["url"],
+                    api_key,
+                    sess_for_media.get("model", ""),
+                    blob,
+                    filename=os.path.basename(file_path or "video.mp4"),
+                    use_proxy=prov.get("proxy", False),
+                )
+                latency_ms = int((time.time() - t0) * 1000)
+                DB.log_media_request(
+                    uid,
+                    provider,
+                    sess_for_media.get("model", ""),
+                    "video_detect",
+                    input_size_bytes=len(blob or b""),
+                    output_size_bytes=len((analysis or "").encode("utf-8")),
+                    latency_ms=latency_ms,
+                    ok=bool(analysis),
+                    error=None if analysis else "empty_analysis",
+                )
+                if analysis:
+                    tg_send_long_text(token, uid, f"🕵️ Video analysis:\n{analysis}")
+                else:
+                    tg_send_text(token, uid, "⚠️ Empty video analysis result.")
+            except Exception as e:
+                DB.log_media_request(
+                    uid,
+                    sess_for_media.get("provider", PROVIDER_DEFAULT),
+                    sess_for_media.get("model", ""),
+                    "video_detect",
+                    input_size_bytes=0,
+                    output_size_bytes=0,
+                    latency_ms=0,
+                    ok=False,
+                    error=str(e),
+                )
+                tg_send_text(token, uid, f"❌ Video analysis error: {str(e)[:300]}")
+            return
+
         if (stt_pending or auto_stt_model) and ("voice" in msg or "audio" in msg or "document" in msg):
             try:
                 media = msg.get("voice") or msg.get("audio") or msg.get("document")
