@@ -538,9 +538,52 @@ def format_bytes(size: int) -> str:
         return f"{size / 1024:.1f} KB"
     return f"{size / (1024 * 1024):.1f} MB"
 
+
+def extract_rate_limit_headers(headers):
+    if not headers:
+        return {}
+    out = {}
+    for k, v in headers.items():
+        lk = k.lower()
+        if ("ratelimit" in lk) or ("rate-limit" in lk) or ("retry-after" in lk):
+            out[lk] = str(v)
+    return out
+
+
+def fetch_openrouter_key_limits(api_key: str) -> dict:
+    if not api_key:
+        return {}
+    req = urllib.request.Request(
+        "https://openrouter.ai/api/v1/key",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "application/json",
+            "User-Agent": "curl/8.7.1",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            raw = json.loads(resp.read().decode())
+        data = raw.get("data", raw)
+        out = {}
+        for k in (
+            "limit",
+            "limit_remaining",
+            "usage",
+            "is_free_tier",
+            "rate_limit",
+            "credits",
+            "credits_remaining",
+        ):
+            if k in data:
+                out[k] = data[k]
+        return out
+    except Exception:
+        return {}
+
 def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tools=True, use_proxy=False):
     usage = {"prompt_tokens": 0, "completion_tokens": 0}
-    meta = {"finish_reason": None, "tool_calls_total": 0, "error": None, "http_latency_ms": 0}
+    meta = {"finish_reason": None, "tool_calls_total": 0, "error": None, "http_latency_ms": 0, "rate_limits": {}}
     roles = [m.get("role", "?") for m in messages]
     log.info(f"ask_llm: model={model} tools={use_tools} proxy={use_proxy} msgs={len(messages)} roles={roles} est_tokens={estimate_tokens(messages)}")
     opener = make_opener(use_proxy)
@@ -560,6 +603,7 @@ def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tool
             t_http = time.time()
             with opener.open(req, timeout=120) as f:
                 meta["http_latency_ms"] += int((time.time() - t_http) * 1000)
+                meta["rate_limits"] = extract_rate_limit_headers(f.headers)
                 res = json.loads(f.read().decode())
                 u = res.get("usage", {}); usage["prompt_tokens"] += u.get("prompt_tokens", 0); usage["completion_tokens"] += u.get("completion_tokens", 0)
                 msg = res["choices"][0]["message"]
@@ -643,6 +687,7 @@ def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tool
             except Exception:
                 pass
             meta["error"] = f"HTTP {e.code}"
+            meta["rate_limits"] = extract_rate_limit_headers(e.headers)
             err_body = ""
             try:
                 err_body = e.read().decode(errors="replace")
@@ -1002,6 +1047,31 @@ def handle_command(uid, username, text, token, admin_id):
                 st_now["last_session_id"] = sid
                 runtimeStatus[uid] = st_now
         sid_text = sid if sid else "нет (новая сессия — UUID появится после первого ответа)"
+        provider = sess.get("provider", PROVIDER_DEFAULT)
+        rl = st.get("last_rate_limits") or {}
+        rl_provider = st.get("last_rate_limits_provider", "")
+        rl_text = "n/a"
+        if provider == "openrouter":
+            or_limits = fetch_openrouter_key_limits(load_provider_key("openrouter"))
+            if or_limits:
+                rl_text = ", ".join([f"{k}={or_limits[k]}" for k in sorted(or_limits.keys())])
+            else:
+                rl_text = "n/a (openrouter key-limits unavailable)"
+        elif provider in ("groq", "cerebras"):
+            if rl and rl_provider == provider:
+                rl_text = ", ".join([f"{k}={v}" for k, v in sorted(rl.items())])
+            else:
+                rl_text = "n/a (send one request with this provider to populate headers)"
+        elif provider in ("nvidia", "huggingface"):
+            if rl and rl_provider == provider:
+                rl_text = ", ".join([f"{k}={v}" for k, v in sorted(rl.items())])
+            else:
+                rl_text = "n/a (provider typically does not expose quota headers)"
+        else:
+            if rl and rl_provider == provider:
+                rl_text = ", ".join([f"{k}={v}" for k, v in sorted(rl.items())])
+            else:
+                rl_text = "n/a"
         txt = (
             "📌 Текущий статус\n"
             f"• Провайдер: `{sess['provider']}`\n"
@@ -1012,6 +1082,7 @@ def handle_command(uid, username, text, token, admin_id):
             f"• Контекст: {ctx_tokens}/{MAX_CONTEXT_TOKENS} ({ctx_pct}%)\n"
             f"• Session UUID: {sid_text}\n"
             f"• Активный запрос: {active}\n"
+            f"• Лимиты: {rl_text}\n"
             f"• Версия: `{__VERSION__}`"
         )
         res = tg_send_text(token, uid, txt, parse_mode="Markdown")
@@ -1386,6 +1457,12 @@ def process_update(upd, token, admin_id):
         DB.add_usage(uid, usage['prompt_tokens'], usage['completion_tokens'])
         req_id = DB.log_request(uid, provider, model, usage['prompt_tokens'], usage['completion_tokens'],
                                 meta['finish_reason'], meta['tool_calls_total'], meta['error'], mode=sess.get("engine_mode", "native"), request_http_ms=meta.get("http_latency_ms", 0))
+        with runtimeStatusLock:
+            st_now = dict(runtimeStatus.get(uid, {}))
+            st_now["last_rate_limits"] = meta.get("rate_limits", {}) or {}
+            st_now["last_rate_limits_provider"] = provider
+            st_now["last_rate_limits_ts"] = int(time.time())
+            runtimeStatus[uid] = st_now
         hist.append({"role": "user", "content": text}); hist.append({"role": "assistant", "content": ans})
         # Avoid clobbering mode/tools with stale in-memory session when updates are processed concurrently.
         latest = DB.get_session(uid)
