@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import sqlite3
 import time
 
@@ -324,21 +325,24 @@ class DB:
                     ORDER BY delivered_answers DESC, total_requests DESC
                     LIMIT ?
                     """,
-                    (limit,),
+                    (),
                 ).fetchall()
                 out = []
                 for provider, model, delivered, total in rows:
                     delivered = delivered or 0
                     total = total or 0
                     rate = (delivered / total * 100.0) if total else 0.0
+                    score = rate * math.log10(total + 1) if total else 0.0
                     out.append({
                         "provider": provider,
                         "model": model,
                         "delivered": delivered,
                         "total": total,
                         "success_rate": rate,
+                        "score": score,
                     })
-                return out
+                out.sort(key=lambda x: (x["score"], x["delivered"], x["total"]), reverse=True)
+                return out[:limit]
         except Exception as e:
             log.error(f"DB get_top_models: {e}")
             return []
@@ -363,20 +367,23 @@ class DB:
                     ORDER BY delivered_answers DESC, total_requests DESC
                     LIMIT ?
                     """,
-                    (limit,),
+                    (),
                 ).fetchall()
                 out = []
                 for provider, delivered, total in rows:
                     delivered = delivered or 0
                     total = total or 0
                     rate = (delivered / total * 100.0) if total else 0.0
+                    score = rate * math.log10(total + 1) if total else 0.0
                     out.append({
                         "provider": provider,
                         "delivered": delivered,
                         "total": total,
                         "success_rate": rate,
+                        "score": score,
                     })
-                return out
+                out.sort(key=lambda x: (x["score"], x["delivered"], x["total"]), reverse=True)
+                return out[:limit]
         except Exception as e:
             log.error(f"DB get_top_providers: {e}")
             return []

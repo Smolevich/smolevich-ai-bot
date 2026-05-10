@@ -1194,19 +1194,20 @@ def build_top_text():
         return "Пока нет данных для топа."
     txt = (
         "📊 *Top Stats*\n"
-        "_delivered = успешный ответ пользователю (text + stt/tts)_\n\n"
+        "_score = success_rate × log10(total + 1), сортировка по score убыв._\n"
+        "_delivered = успешная доставка ответа пользователю (text + stt/tts)_\n\n"
         "🏆 *Top 3 Models*\n"
     )
     for i, item in enumerate(top_models, start=1):
         txt += (
             f"{i}. `{item['provider']}/{item['model']}`\n"
-            f"   delivered: *{item['delivered']}* | total: *{item['total']}* | success: *{item['success_rate']:.1f}%*\n"
+            f"   score: *{item.get('score', 0):.2f}* | delivered: *{item['delivered']}* | total: *{item['total']}* | success: *{item['success_rate']:.1f}%*\n"
         )
     txt += "\n🏅 *Top 3 Providers*\n"
     for i, item in enumerate(top_providers, start=1):
         txt += (
             f"{i}. `{item['provider']}`\n"
-            f"   delivered: *{item['delivered']}* | total: *{item['total']}* | success: *{item['success_rate']:.1f}%*\n"
+            f"   score: *{item.get('score', 0):.2f}* | delivered: *{item['delivered']}* | total: *{item['total']}* | success: *{item['success_rate']:.1f}%*\n"
         )
     return txt
 
