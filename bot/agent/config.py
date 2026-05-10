@@ -50,7 +50,15 @@ PROVIDERS: dict[str, dict[str, Any]] = {
         "supports_tools": True,
         "proxy": False,
     },
+    "huggingface": {
+        "url": "https://router.huggingface.co/v1/chat/completions",
+        "models_url": "https://router.huggingface.co/v1/models",
+        "key_env": "HF_TOKEN",
+        "key_file": "/etc/socks-monitor/.hf_key",
+        "default_model": "openai/gpt-oss-20b:fastest",
+        "supports_tools": True,
+        "proxy": False,
+    },
 }
 
 PROVIDER_DEFAULT = "openrouter"
-

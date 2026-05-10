@@ -1055,6 +1055,23 @@ def process_update(upd, token, admin_id):
 
         if has_video_detector and has_video_payload:
             try:
+                provider = sess_for_media.get("provider", PROVIDER_DEFAULT)
+                selected_model = sess_for_media.get("model", "")
+                model_info = DB.get_model_info(provider, selected_model)
+                if model_info and not model_info.get("available", False):
+                    ago = int(time.time()) - int(model_info.get("last_check") or 0)
+                    if ago < 60:
+                        checked = "just now"
+                    elif ago < 3600:
+                        checked = f"{ago // 60}m ago"
+                    else:
+                        checked = f"{ago // 3600}h ago"
+                    tg_send_text(
+                        token,
+                        uid,
+                        f"❌ Selected detector model is offline now ({provider}/{selected_model}). Last check: {checked}. Choose another model in /models -> VideoDetect.",
+                    )
+                    return
                 media = msg.get("video") or msg.get("animation") or msg.get("document")
                 mime_type = str((media or {}).get("mime_type", "")).lower()
                 file_name = str((media or {}).get("file_name", "")).lower()
@@ -1081,7 +1098,6 @@ def process_update(upd, token, admin_id):
                 file_id = media.get("file_id")
                 t0 = time.time()
                 file_path, blob = tg_get_file_bytes(token, file_id)
-                provider = sess_for_media.get("provider", PROVIDER_DEFAULT)
                 prov = PROVIDERS.get(provider, PROVIDERS[PROVIDER_DEFAULT])
                 api_key = load_provider_key(provider) or load_provider_key(PROVIDER_DEFAULT)
                 if not api_key:
@@ -1089,7 +1105,7 @@ def process_update(upd, token, admin_id):
                 analysis = analyze_video_detection(
                     prov["url"],
                     api_key,
-                    sess_for_media.get("model", ""),
+                    selected_model,
                     blob,
                     filename=os.path.basename(file_path or "video.mp4"),
                     use_proxy=prov.get("proxy", False),
@@ -1098,7 +1114,7 @@ def process_update(upd, token, admin_id):
                 DB.log_media_request(
                     uid,
                     provider,
-                    sess_for_media.get("model", ""),
+                    selected_model,
                     "video_detect",
                     input_size_bytes=len(blob or b""),
                     output_size_bytes=len((analysis or "").encode("utf-8")),

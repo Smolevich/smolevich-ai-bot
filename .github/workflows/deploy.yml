@@ -37,13 +37,14 @@ jobs:
         uses: appleboy/ssh-action@v1.2.2
         env:
           BOT_PROXY_URL: ${{ secrets.BOT_PROXY_URL }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         with:
           host: ${{ secrets.VDS_HOST }}
           port: ${{ secrets.VDS_PORT }}
           username: ${{ secrets.VDS_USER }}
           key: ${{ secrets.VDS_SSH_KEY }}
           passphrase: ${{ secrets.VDS_SSH_PASSPHRASE }}
-          envs: BOT_PROXY_URL
+          envs: BOT_PROXY_URL,HF_TOKEN
           script: |
             set -e
             sudo install -m 0755 /tmp/deploy-bot/vds-agent.py          /usr/local/bin/vds-agent
@@ -60,6 +61,10 @@ jobs:
             if [ -n "$BOT_PROXY_URL" ]; then
               sudo install -m 0600 /dev/null /etc/socks-monitor/vds-agent.env
               echo "BOT_PROXY_URL=$BOT_PROXY_URL" | sudo tee /etc/socks-monitor/vds-agent.env >/dev/null
+            fi
+            if [ -n "$HF_TOKEN" ]; then
+              sudo install -m 0600 /dev/null /etc/socks-monitor/.hf_key
+              echo "$HF_TOKEN" | sudo tee /etc/socks-monitor/.hf_key >/dev/null
             fi
             sudo systemctl daemon-reload
             sudo /usr/local/bin/migrate_bot_db
