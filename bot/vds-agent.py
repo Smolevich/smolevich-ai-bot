@@ -526,22 +526,41 @@ def analyze_video_detection(api_url, api_key, model, video_bytes, filename="vide
     return (data.get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
 
 
+BEGINNER_COMMANDS = [
+    {"command": "menu", "description": "Меню (главное)"},
+    {"command": "help", "description": "Помощь"},
+    {"command": "reset", "description": "Сброс истории"},
+]
+PRO_COMMANDS = [
+    {"command": "menu", "description": "Меню (главное)"},
+    {"command": "help", "description": "Show available commands"},
+    {"command": "provider", "description": "Select provider"},
+    {"command": "models", "description": "Select model"},
+    {"command": "top", "description": "Top 3 models/providers by delivered answers"},
+    {"command": "status", "description": "Show current session status"},
+    {"command": "mode", "description": "Engine mode: native/claude/opencode/pi"},
+    {"command": "tools", "description": "Tools mode: on/off/status"},
+    {"command": "model", "description": "Set model manually"},
+    {"command": "stt", "description": "Speech-to-text (send voice/audio next)"},
+    {"command": "tts", "description": "Text-to-speech: /tts your text"},
+    {"command": "reset", "description": "Reset chat history"},
+    {"command": "feedback", "description": "Send feedback to admin"},
+    {"command": "debug", "description": "Toggle debug footer"},
+]
+
+def set_user_commands(token, uid, profile):
+    """Per-chat slash-menu override — called after profile toggle so the user
+    immediately sees a shorter or longer command list in Telegram autocomplete."""
+    cmds = PRO_COMMANDS if profile == "pro" else BEGINNER_COMMANDS
+    payload = {"commands": cmds, "scope": {"type": "chat", "chat_id": uid}}
+    res = tg_request(token, "setMyCommands", payload)
+    if not res.get("ok"):
+        log.warning(f"setMyCommands per-chat failed for uid={uid}: {res}")
+
 def set_bot_commands(token):
-    commands = [
-        {"command": "help", "description": "Show available commands"},
-        {"command": "provider", "description": "Select provider"},
-        {"command": "models", "description": "Select model"},
-        {"command": "top", "description": "Top 3 models/providers by delivered answers"},
-        {"command": "status", "description": "Show current session status"},
-        {"command": "mode", "description": "Engine mode: native/claude/opencode/pi"},
-        {"command": "tools", "description": "Tools mode: on/off/status"},
-        {"command": "model", "description": "Set model manually"},
-        {"command": "stt", "description": "Speech-to-text (send voice/audio next)"},
-        {"command": "tts", "description": "Text-to-speech: /tts your text"},
-        {"command": "reset", "description": "Reset chat history"},
-        {"command": "feedback", "description": "Send feedback to admin"},
-        {"command": "debug", "description": "Toggle debug footer"},
-    ]
+    # Global default scope = beginner-friendly minimum. Per-user override is
+    # installed when a user toggles their profile via /menu → Настройки.
+    commands = BEGINNER_COMMANDS
 
     # Telegram command menu may be scoped and language-specific.
     # Publish commands for default + private chats, both generic and RU locale,
@@ -1149,6 +1168,7 @@ def handle_callback(cb, token, admin_id):
         elif action == "profile_toggle":
             new_profile = "pro" if sess.get("profile", "beginner") == "beginner" else "beginner"
             DB.save_profile(uid, new_profile)
+            set_user_commands(token, uid, new_profile)
             sess["profile"] = new_profile
             s_txt, s_kb = build_menu_settings(sess)
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": s_txt, "reply_markup": {"inline_keyboard": s_kb}})
@@ -1195,20 +1215,34 @@ def handle_callback(cb, token, admin_id):
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Debug отправлен"})
 
 def handle_command(uid, username, text, token, admin_id):
-    if text == "/start" or text == "/help":
-        txt = (
-            "Привет! Я продвинутый AI-ассистент.\n"
-            "Что я умею:\n"
-            "💬 Общение с моделями текстом и кодом\n"
-            "🛠 Использование инструментов (поиск, выполнение скриптов)\n"
-            "🎙 Распознавание голоса (/stt) и озвучка (/tts)\n\n"
-            "Настройки:\n"
-            "• /provider — выбор платформы\n"
-            "• /models — выбор конкретной модели\n"
-            "• /mode — режим работы (Native, Claude Code и др.)\n"
-            "• /tools — включить/выключить инструменты\n"
-            "• /debug — режим отладки (техническая информация)"
-        )
+    if text == "/start" or text == "/help" or text.startswith("/help "):
+        sess = DB.get_session(uid)
+        is_pro = sess.get("profile", "beginner") == "pro"
+        wants_advanced = is_pro or text.strip() == "/help advanced"
+        if wants_advanced:
+            txt = (
+                "Привет! Я продвинутый AI-ассистент.\n"
+                "Что я умею:\n"
+                "💬 Общение с моделями текстом и кодом\n"
+                "🛠 Использование инструментов (поиск, выполнение скриптов)\n"
+                "🎙 Распознавание голоса (/stt) и озвучка (/tts)\n\n"
+                "Настройки:\n"
+                "• /menu — главное меню кнопками\n"
+                "• /provider — выбор платформы\n"
+                "• /models — выбор конкретной модели\n"
+                "• /mode — режим работы (Native, Claude Code и др.)\n"
+                "• /tools — включить/выключить инструменты\n"
+                "• /debug — режим отладки (техническая информация)"
+            )
+        else:
+            txt = (
+                "Привет! Я AI-ассистент.\n\n"
+                "Просто напиши сообщение — я отвечу.\n"
+                "🎙 Голосовое тоже принимаю (расшифрую).\n\n"
+                "Кнопки и настройки — /menu\n"
+                "Сбросить историю — /reset\n"
+                "Все команды — /help advanced"
+            )
         tg_request(token, "sendMessage", {"chat_id": uid, "text": txt})
     elif text == "/menu":
         sess = DB.get_session(uid)
