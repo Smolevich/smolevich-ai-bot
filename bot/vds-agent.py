@@ -776,7 +776,7 @@ def ask_via_acpx(uid, text, sess):
             env["OPENAI_API_KEY"] = api_key
             env["OPENAI_BASE_URL"] = base_url
             env["ANTHROPIC_AUTH_TOKEN"] = api_key
-            env["ANTHROPIC_API_KEY"] = api_key
+            env["ANTHROPIC_API_KEY"] = ""
             env["ANTHROPIC_BASE_URL"] = base_url.replace("/v1", "")
         except Exception:
             pass
@@ -831,7 +831,7 @@ def ask_via_acpx(uid, text, sess):
             "-e", f"OPENAI_API_KEY={env.get('OPENAI_API_KEY', '')}",
             "-e", f"ANTHROPIC_BASE_URL={env.get('ANTHROPIC_BASE_URL', '')}",
             "-e", f"ANTHROPIC_AUTH_TOKEN={env.get('ANTHROPIC_AUTH_TOKEN', '')}",
-            "-e", f"ANTHROPIC_API_KEY={env.get('ANTHROPIC_API_KEY', '')}",
+            "-e", "ANTHROPIC_API_KEY=",
             "-e", f"OPENAI_BASE_URL={env.get('OPENAI_BASE_URL', '')}",
             "-e", f"OPENAI_MODEL={mode_model}",
             "-e", f"ANTHROPIC_DEFAULT_OPUS_MODEL={mode_model}",
