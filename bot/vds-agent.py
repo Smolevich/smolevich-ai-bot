@@ -813,9 +813,11 @@ def ask_via_acpx(uid, text, sess):
         env["CLAUDE_CONFIG_DIR"] = claude_cfg_dir
         # claude-agent-acp disallows bypassPermissions for root unless IS_SANDBOX is set.
         env["IS_SANDBOX"] = "1"
-        env["HTTP_PROXY"] = PROXY_URL
-        env["HTTPS_PROXY"] = PROXY_URL
-        env["ALL_PROXY"] = PROXY_URL
+        # Don't put HTTP(S)_PROXY into the subprocess env unconditionally:
+        # podman auto-forwards those host vars into the container, which routed
+        # OpenRouter traffic through an unrelated proxy and produced 403s for
+        # providers with use_proxy=False. Proxy is wired explicitly via `-e`
+        # below only when prov_cfg["proxy"] is True.
 
         # Prepare workspace subdirs for containerized harness.
         for sub in [".claude-home", ".claude-config", ".claude-cache", ".claude-state"]:
