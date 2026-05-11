@@ -960,8 +960,21 @@ def handle_callback(cb, token, admin_id):
         DB.save_session(uid, default_model, sess["history"], provider=prov_name, tools_enabled=default_tools, engine_mode=sess.get("engine_mode", "native"))
         tg_request(token, "editMessageText", {"chat_id": cb["message"]["chat"]["id"], "message_id": cb["message"]["message_id"], "text": f"✅ Provider: {prov_name}\nModel: {default_model}\nTools: {'on' if default_tools else 'off'}"})
     elif data.startswith("set_model:"):
-        m = sanitize_model_id(data.split(":", 1)[1]); sess = DB.get_session(uid); DB.save_session(uid, m, sess["history"], provider=sess["provider"], tools_enabled=sess["tools_enabled"], engine_mode=sess.get("engine_mode", "native"))
+        m = sanitize_model_id(data.split(":", 1)[1])
+        sess = DB.get_session(uid)
         info = DB.get_model_info(sess["provider"], m)
+        # Reject non-chat categories: audio/image/video/embedding/safety/translation are
+        # used via /stt /tts /video flows. Only block when category is known and non-chat —
+        # missing health-check rows shouldn't prevent picking a fresh model.
+        cat = (info or {}).get("category") or ""
+        if cat and cat not in ("text", "code"):
+            tg_request(token, "answerCallbackQuery", {
+                "callback_query_id": cb["id"],
+                "text": f"Эта модель в категории {cat}. Открой /menu → 🎙 Голос / 🛠 Код / 🖼 Картинки.",
+                "show_alert": True,
+            })
+            return
+        DB.save_session(uid, m, sess["history"], provider=sess["provider"], tools_enabled=sess["tools_enabled"], engine_mode=sess.get("engine_mode", "native"))
         txt = f"✅ Model: {m}"
         if info:
             status = "🟢 Online" if info["available"] else "🔴 Offline"
