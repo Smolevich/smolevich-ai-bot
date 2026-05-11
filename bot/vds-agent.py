@@ -856,7 +856,7 @@ def ask_via_acpx(uid, text, sess):
         podman_base += [
             "-v", f"{cwd}:/workspace",
             "-w", "/workspace",
-            "acpx-claude:latest",
+            "localhost/acpx-claude:latest",
         ]
         if agent == "claude":
             # Route Claude mode through acpx wrapper for consistent model/env handling.

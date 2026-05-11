@@ -29,7 +29,7 @@ jobs:
           username: ${{ secrets.VDS_USER }}
           key: ${{ secrets.VDS_SSH_KEY }}
           passphrase: ${{ secrets.VDS_SSH_PASSPHRASE }}
-          source: bot/vds-agent.py,bot/migrate.py,bot/model-health-check.py,bot/model-audio-check.py,bot/model-media-check.py,bot/vds-agent.service,bot/migrations,bot/agent
+          source: bot/vds-agent.py,bot/migrate.py,bot/model-health-check.py,bot/model-audio-check.py,bot/model-media-check.py,bot/vds-agent.service,bot/migrations,bot/agent,bot/Containerfile.acpx-claude
           target: /tmp/deploy-bot
           strip_components: 1
 
@@ -53,10 +53,21 @@ jobs:
             sudo install -m 0755 /tmp/deploy-bot/model-audio-check.py  /usr/local/bin/model-audio-check
             sudo install -m 0755 /tmp/deploy-bot/model-media-check.py  /usr/local/bin/model-media-check
             sudo install -m 0644 /tmp/deploy-bot/vds-agent.service     /etc/systemd/system/vds-agent.service
+            sudo install -m 0644 /tmp/deploy-bot/Containerfile.acpx-claude /usr/local/bin/Containerfile.acpx-claude
             sudo mkdir -p /usr/local/bin/migrations
             sudo cp /tmp/deploy-bot/migrations/*.py /usr/local/bin/migrations/
             sudo mkdir -p /usr/local/bin/agent
             sudo cp /tmp/deploy-bot/agent/*.py /usr/local/bin/agent/
+
+            # Build the sandbox image if it doesn't exist or file changed
+            if ! sudo podman inspect localhost/acpx-claude:latest >/dev/null 2>&1; then
+              sudo podman build -t acpx-claude:latest -f /usr/local/bin/Containerfile.acpx-claude
+            elif [ /usr/local/bin/Containerfile.acpx-claude -nt /var/lib/containers/storage ]; then
+              # Simple heuristic: rebuild if Containerfile is newer than some storage marker
+              # Actually, always building is safer but slower. Let's just build.
+              sudo podman build -t acpx-claude:latest -f /usr/local/bin/Containerfile.acpx-claude
+            fi
+            
             rm -rf /tmp/deploy-bot
             if [ -n "$BOT_PROXY_URL" ]; then
               sudo install -m 0600 /dev/null /etc/socks-monitor/vds-agent.env
