@@ -1162,6 +1162,10 @@ def handle_callback(cb, token, admin_id):
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": "🛠 Код-режим (Claude Code) включён.\nОтправь задачу — выполню в песочнице.", "reply_markup": {"inline_keyboard": [[{"text": "← Назад", "callback_data": "menu:back"}]]}})
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Код"})
         elif action == "voice":
+            # Put user into the pending-STT set so the next voice/audio message
+            # gets transcribed automatically, same as typing /stt.
+            with pendingSttUsersLock:
+                pendingSttUsers.add(uid)
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": "🎙 Голос\nПришли голосовое — расшифрую.\nИли используй /tts <текст> для озвучки.", "reply_markup": {"inline_keyboard": [[{"text": "← Назад", "callback_data": "menu:back"}]]}})
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Голос"})
         elif action == "image":
