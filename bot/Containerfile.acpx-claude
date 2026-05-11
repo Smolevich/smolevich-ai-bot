@@ -1,6 +1,11 @@
-FROM docker.io/library/python:3.11-alpine
+FROM docker.io/library/python:3.11-slim
 
-RUN apk add --no-cache nodejs npm git bash \
+# opencode-ai ships glibc binaries — musl-based alpine can't load them, so
+# this image stays on debian-slim. Other tools (claude-code, pi-coding-agent,
+# acpx, claude-agent-acp) are pure node.js packages.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends nodejs npm git bash ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/* \
     && npm i -g @anthropic-ai/claude-code acpx@latest @mariozechner/pi-coding-agent @agentclientprotocol/claude-agent-acp opencode-ai
 
 WORKDIR /workspace
