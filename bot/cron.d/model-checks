@@ -1,0 +1,9 @@
+# Model health/audio/media checks.
+# Deployed by CI to /etc/cron.d/model-checks.
+# flock prevents overlapping runs; timeout kills a stuck job before the next one starts.
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+*/10 * * * * root  flock -n /var/lock/mhc.lock timeout 540  /usr/local/bin/model-health-check  >> /var/log/model-health-check.log  2>&1
+*/15 * * * * root  flock -n /var/lock/mac.lock timeout 540  /usr/local/bin/model-audio-check   >> /var/log/model-audio-check.log   2>&1
+*/15 * * * * root  flock -n /var/lock/mmc.lock timeout 540  /usr/local/bin/model-media-check   >> /var/log/model-media-check.log   2>&1

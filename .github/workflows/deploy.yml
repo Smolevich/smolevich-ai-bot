@@ -29,7 +29,7 @@ jobs:
           username: ${{ secrets.VDS_USER }}
           key: ${{ secrets.VDS_SSH_KEY }}
           passphrase: ${{ secrets.VDS_SSH_PASSPHRASE }}
-          source: bot/vds-agent.py,bot/migrate.py,bot/model-health-check.py,bot/model-audio-check.py,bot/model-media-check.py,bot/vds-agent.service,bot/migrations,bot/agent,bot/Containerfile.acpx-claude
+          source: bot/vds-agent.py,bot/migrate.py,bot/model-health-check.py,bot/model-audio-check.py,bot/model-media-check.py,bot/vds-agent.service,bot/migrations,bot/agent,bot/Containerfile.acpx-claude,bot/cron.d
           target: /tmp/deploy-bot
           strip_components: 1
 
@@ -58,6 +58,9 @@ jobs:
             sudo cp /tmp/deploy-bot/migrations/*.py /usr/local/bin/migrations/
             sudo mkdir -p /usr/local/bin/agent
             sudo cp /tmp/deploy-bot/agent/*.py /usr/local/bin/agent/
+            sudo install -m 0644 /tmp/deploy-bot/cron.d/model-checks /etc/cron.d/model-checks
+            sudo rm -f /etc/cron.d/model-health-check /etc/cron.d/model-audio-check /etc/cron.d/model-media-check
+            sudo touch /var/log/model-health-check.log /var/log/model-audio-check.log /var/log/model-media-check.log
 
             # Build the sandbox image if it doesn't exist or file changed
             if ! sudo podman inspect localhost/acpx-claude:latest >/dev/null 2>&1; then

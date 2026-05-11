@@ -10,7 +10,9 @@ Push to `main` touching `bot/**` triggers `.github/workflows/deploy.yml` (`apple
 | `bot/migrate.py` | `/usr/local/bin/migrate_bot_db` |
 | `bot/model-health-check.py` | `/usr/local/bin/model-health-check` |
 | `bot/model-audio-check.py` | `/usr/local/bin/model-audio-check` |
+| `bot/model-media-check.py` | `/usr/local/bin/model-media-check` |
 | `bot/vds-agent.service` | `/etc/systemd/system/vds-agent.service` |
+| `bot/cron.d/model-checks` | `/etc/cron.d/model-checks` |
 | `bot/migrations/*.py` | `/usr/local/bin/migrations/` |
 
 After copying, the workflow runs `systemctl daemon-reload`, `migrate_bot_db`, then `systemctl restart vds-agent` and verifies it's `active`.
@@ -25,13 +27,16 @@ Required GitHub secrets: `VDS_HOST`, `VDS_PORT`, `VDS_USER`, `VDS_SSH_KEY`, `VDS
 
 Ships `bot/vds-agent.py` only and restarts the service. Use the GitHub workflow if you also need to push migrations / cron scripts / the systemd unit. Requires your private SSH host alias in `~/.ssh/config` (examples below use `<bot-server>`).
 
-## Cron jobs (provisioned manually on the server)
+## Cron jobs (deployed via CI)
 
-- `/etc/cron.d/model-health-check` — `*/5 * * * *` runs `/usr/local/bin/model-health-check`, logs to `/var/log/model-health-check.log`.
-- `/etc/cron.d/model-audio-check` — recommended separate schedule for `/usr/local/bin/model-audio-check` (for STT/TTS probes), logs to `/var/log/model-audio-check.log`.
-- `/etc/cron.d/socks-notify` — `0 * * * *` runs `/usr/local/bin/socks-notify` (separate proxy monitor, not in this repo).
+`bot/cron.d/model-checks` is installed to `/etc/cron.d/model-checks` on every deploy.
+All three scripts run every **10 minutes** with `flock` to prevent overlapping runs:
 
-The cron files themselves are not in CI — set them up once per host.
+| Script | Log |
+| --- | --- |
+| `model-health-check` (text/code probes) | `/var/log/model-health-check.log` |
+| `model-audio-check` (STT/TTS probes) | `/var/log/model-audio-check.log` |
+| `model-media-check` (image/video discovery) | `/var/log/model-media-check.log` |
 
 ## Verify
 
@@ -41,6 +46,7 @@ ssh <bot-server> 'systemctl is-active vds-agent'
 ssh <bot-server> 'journalctl -u vds-agent -n 50'
 ssh <bot-server> 'tail -n 50 /var/log/model-health-check.log'
 ssh <bot-server> 'tail -n 50 /var/log/model-audio-check.log'
+ssh <bot-server> 'tail -n 50 /var/log/model-media-check.log'
 ```
 
 ## Telegram command menu refresh
