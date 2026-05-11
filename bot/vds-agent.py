@@ -1416,6 +1416,16 @@ def handle_command(uid, username, text, token, admin_id):
             sess = DB.get_session(uid)
             tts_model = sess.get("model", "")
             used_provider = sess.get("provider", PROVIDER_DEFAULT)
+            # If active chat model isn't TTS-capable, pick the fastest healthy
+            # TTS model from model_health instead of passing e.g. qwen/qwen3-32b.
+            if not any(k in (tts_model or "").lower() for k in ("orpheus", "tts", "voice", "speech")):
+                picked_prov, picked_model = DB.pick_default_tts_model()
+                if picked_model:
+                    tts_model = picked_model
+                    used_provider = picked_prov
+                else:
+                    tts_model = "canopylabs/orpheus-v1-english"
+                    used_provider = "groq"
             audio, used_provider, used_model = tts_with_fallback(used_provider, source_text, tts_model)
             latency_ms = int((time.time() - t0) * 1000)
             res = tg_send_document_bytes(token, uid, "tts.wav", audio, caption="🔊 TTS")
@@ -1639,12 +1649,17 @@ def process_update(upd, token, admin_id):
                 file_path, blob = tg_get_file_bytes(token, file_id)
                 stt_model = sess_for_media.get("model", "")
                 used_provider = sess_for_media.get("provider", PROVIDER_DEFAULT)
-                # If the active chat model isn't an STT/audio model, force the
-                # known-good groq whisper path. Otherwise transcribe gets called
-                # with e.g. qwen/qwen3-32b and the provider returns HTTP 400.
+                # If the active chat model isn't an STT/audio model, pick the
+                # fastest healthy STT model from model_health. Otherwise we'd
+                # pass e.g. qwen/qwen3-32b to groq and get HTTP 400.
                 if not any(k in (stt_model or "").lower() for k in ("whisper", "speech-to-text", "stt")):
-                    stt_model = "whisper-large-v3-turbo"
-                    used_provider = "groq"
+                    picked_prov, picked_model = DB.pick_default_stt_model()
+                    if picked_model:
+                        stt_model = picked_model
+                        used_provider = picked_prov
+                    else:
+                        stt_model = "whisper-large-v3-turbo"
+                        used_provider = "groq"
                 transcript, used_provider, used_model = transcribe_audio_with_fallback(
                     used_provider,
                     blob,

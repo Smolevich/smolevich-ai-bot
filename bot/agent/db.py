@@ -158,17 +158,8 @@ class DB:
                     last_session_id = (res[5] if len(res) > 5 else None) or ""
                     profile = (res[6] if len(res) > 6 else None) or "beginner"
                     return {"model": sanitize_model_id(res[0]), "history": json.loads(res[1]), "provider": prov, "tools_enabled": tools_enabled == 1, "engine_mode": engine_mode, "last_session_id": last_session_id, "profile": profile}
-                # Brand-new session — pick top healthy text model for default provider, fall back to static default.
-                chosen = PROVIDERS[PROVIDER_DEFAULT]["default_model"]
-                try:
-                    row = conn.execute(
-                        "SELECT model_id FROM model_health WHERE provider = ? AND category = 'text' AND available = 1 ORDER BY latency_ms ASC LIMIT 1",
-                        (PROVIDER_DEFAULT,),
-                    ).fetchone()
-                    if row and row[0]:
-                        chosen = row[0]
-                except Exception:
-                    pass
+                # Brand-new session — pick historically best healthy text model; fall back to fastest healthy; then to static default.
+                chosen = DB.pick_default_text_model(PROVIDER_DEFAULT)
                 return {"model": chosen, "history": [], "provider": PROVIDER_DEFAULT, "tools_enabled": True, "engine_mode": "native", "last_session_id": "", "profile": "beginner"}
         except Exception as e:
             log.error(f"DB get_session: {e}")
@@ -196,6 +187,58 @@ class DB:
             DB.withRetry(op, "save_session")
         except Exception as e:
             log.error(f"DB save_session: {e}")
+    @staticmethod
+    def pick_default_text_model(provider):
+        """Pick a sensible chat model for a brand-new session.
+        1. Best-scoring model in request_log among ones currently healthy.
+        2. Otherwise fastest available text model.
+        3. Otherwise the provider's static default constant.
+        """
+        static_default = PROVIDERS.get(provider, {}).get("default_model", "")
+        try:
+            healthy_list = DB.get_healthy_models(provider, category="text", limit=50)
+            if not healthy_list:
+                return static_default
+            healthy_ids = {m["id"] for m in healthy_list}
+            for entry in DB.get_top_models(limit=20):
+                if entry.get("provider") == provider and entry.get("model") in healthy_ids:
+                    return entry["model"]
+            return healthy_list[0]["id"]
+        except Exception as e:
+            log.error(f"DB pick_default_text_model: {e}")
+            return static_default
+    @staticmethod
+    def pick_default_tts_model():
+        """Pick the fastest available TTS model across known providers."""
+        try:
+            with DB.connectDb() as conn:
+                row = conn.execute(
+                    "SELECT provider, model_id FROM model_health "
+                    "WHERE category='audio' AND available=1 AND capabilities LIKE '%audio:tts%' "
+                    "ORDER BY latency_ms ASC LIMIT 1"
+                ).fetchone()
+                if row:
+                    return row[0], row[1]
+        except Exception as e:
+            log.error(f"DB pick_default_tts_model: {e}")
+        return None, None
+    @staticmethod
+    def pick_default_stt_model():
+        """Pick the fastest available STT model across known providers.
+        Returns (provider, model_id) or (None, None) if nothing healthy.
+        """
+        try:
+            with DB.connectDb() as conn:
+                row = conn.execute(
+                    "SELECT provider, model_id FROM model_health "
+                    "WHERE category='audio' AND available=1 AND capabilities LIKE '%audio:stt%' "
+                    "ORDER BY latency_ms ASC LIMIT 1"
+                ).fetchone()
+                if row:
+                    return row[0], row[1]
+        except Exception as e:
+            log.error(f"DB pick_default_stt_model: {e}")
+        return None, None
     @staticmethod
     def save_profile(uid, profile):
         # Persist beginner/pro profile without touching the rest of the session state.
