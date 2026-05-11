@@ -789,18 +789,6 @@ def ask_via_acpx(uid, text, sess):
             env["ANTHROPIC_BASE_URL"] = base_url.replace("/v1", "")
         except Exception:
             pass
-        # Pi-native provider env vars (pi ignores generic OPENAI_API_KEY for
-        # non-OpenAI providers and expects provider-specific keys).
-        piProviderEnv = {
-            "openrouter": "OPENROUTER_API_KEY",
-            "groq": "GROQ_API_KEY",
-            "cerebras": "CEREBRAS_API_KEY",
-            "nvidia": "OPENAI_API_KEY",  # nvidia uses OpenAI-compat
-        }
-        for pname, evar in piProviderEnv.items():
-            pkey = load_provider_key(pname)
-            if pkey:
-                env[evar] = pkey
         env["OPENAI_MODEL"] = mode_model
         env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = mode_model
         env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = mode_model
@@ -854,10 +842,6 @@ def ask_via_acpx(uid, text, sess):
             "-e", "IS_SANDBOX=1",
             "-e", f"ACPX_APPEND_SYSTEM_PROMPT={env.get('ACPX_APPEND_SYSTEM_PROMPT', '')}",
         ]
-        # Pass pi-native provider keys into container.
-        for envVar in ("OPENROUTER_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY"):
-            if env.get(envVar):
-                podman_base += ["-e", f"{envVar}={env[envVar]}"]
         if use_proxy:
             podman_base += [
                 "-e", f"HTTPS_PROXY={PROXY_URL}",
