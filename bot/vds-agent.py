@@ -705,7 +705,8 @@ def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tool
                 err_body = e.read().decode(errors="replace")
             except Exception:
                 err_body = ""
-            if e.code == 404: return f"❌ Model `{model}` unavailable.", usage, meta
+            hint = "\nОткрой /menu или /models чтобы выбрать другую."
+            if e.code == 404: return f"❌ Модель `{model}` недоступна.{hint}", usage, meta
             if e.code == 429:
                 val = e.headers.get("Retry-After") or e.headers.get("x-ratelimit-reset")
                 try:
@@ -713,10 +714,10 @@ def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tool
                     if v > 1e9: v -= time.time()
                     wait_info = f" (Retry in {format_wait_time(max(0, v))})"
                 except: wait_info = f" ({val})"
-                return f"❌ Rate limit reached{wait_info}.", usage, meta
+                return f"❌ Лимит запросов{wait_info}.{hint}", usage, meta
             if err_body:
                 log.warning(f"HTTP {e.code} from provider for model={model}: {err_body[:400]}")
-            return f"❌ HTTP Error: {e}", usage, meta
+            return f"❌ Ошибка провайдера (HTTP {e.code}).{hint}", usage, meta
         except Exception as e:
             try:
                 meta["http_latency_ms"] += int((time.time() - t_http) * 1000)
