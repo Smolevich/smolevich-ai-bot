@@ -157,7 +157,18 @@ class DB:
                     engine_mode = (res[4] if len(res) > 4 else None) or "native"
                     last_session_id = (res[5] if len(res) > 5 else None) or ""
                     return {"model": sanitize_model_id(res[0]), "history": json.loads(res[1]), "provider": prov, "tools_enabled": tools_enabled == 1, "engine_mode": engine_mode, "last_session_id": last_session_id}
-                return {"model": PROVIDERS[PROVIDER_DEFAULT]["default_model"], "history": [], "provider": PROVIDER_DEFAULT, "tools_enabled": True, "engine_mode": "native", "last_session_id": ""}
+                # Brand-new session — pick top healthy text model for default provider, fall back to static default.
+                chosen = PROVIDERS[PROVIDER_DEFAULT]["default_model"]
+                try:
+                    row = conn.execute(
+                        "SELECT model_id FROM model_health WHERE provider = ? AND category = 'text' AND available = 1 ORDER BY latency_ms ASC LIMIT 1",
+                        (PROVIDER_DEFAULT,),
+                    ).fetchone()
+                    if row and row[0]:
+                        chosen = row[0]
+                except Exception:
+                    pass
+                return {"model": chosen, "history": [], "provider": PROVIDER_DEFAULT, "tools_enabled": True, "engine_mode": "native", "last_session_id": ""}
         except Exception as e:
             log.error(f"DB get_session: {e}")
             return {"model": PROVIDERS[PROVIDER_DEFAULT]["default_model"], "history": [], "provider": PROVIDER_DEFAULT, "tools_enabled": True, "engine_mode": "native", "last_session_id": ""}
