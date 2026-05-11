@@ -5,7 +5,7 @@ import sys
 from yoyo import read_migrations, get_backend
 
 DB_FILE = "/var/lib/telegram-llm-bot.db"
-MIGRATIONS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "migrations")
+MIGRATIONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "migrations")
 
 def apply_migrations():
     print(f"Applying migrations from {MIGRATIONS_DIR} to {DB_FILE}...")
