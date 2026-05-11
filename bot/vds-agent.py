@@ -785,7 +785,11 @@ def ask_via_acpx(uid, text, sess):
             env["OPENAI_API_KEY"] = api_key
             env["OPENAI_BASE_URL"] = base_url
             env["ANTHROPIC_AUTH_TOKEN"] = api_key
-            env["ANTHROPIC_API_KEY"] = ""
+            # Verified empirically against claude-code 2.1.138 + claude-agent-acp 0.33.1:
+            # empty ANTHROPIC_API_KEY makes claude-code skip the auth header and
+            # OpenRouter responds with 403. Matches test-claude-openrouter.sh.
+            # Do not "fix" back to "" based on stale OpenRouter docs.
+            env["ANTHROPIC_API_KEY"] = api_key
             env["ANTHROPIC_BASE_URL"] = base_url.replace("/v1", "")
         except Exception:
             pass
@@ -830,7 +834,7 @@ def ask_via_acpx(uid, text, sess):
             "-e", f"OPENAI_API_KEY={env.get('OPENAI_API_KEY', '')}",
             "-e", f"ANTHROPIC_BASE_URL={env.get('ANTHROPIC_BASE_URL', '')}",
             "-e", f"ANTHROPIC_AUTH_TOKEN={env.get('ANTHROPIC_AUTH_TOKEN', '')}",
-            "-e", "ANTHROPIC_API_KEY=",
+            "-e", f"ANTHROPIC_API_KEY={env.get('ANTHROPIC_API_KEY', '')}",
             "-e", f"OPENAI_BASE_URL={env.get('OPENAI_BASE_URL', '')}",
             "-e", f"OPENAI_MODEL={mode_model}",
             "-e", f"ANTHROPIC_DEFAULT_OPUS_MODEL={mode_model}",
