@@ -856,6 +856,19 @@ def ask_via_acpx(uid, text, sess):
                 "-e", f"HTTP_PROXY={PROXY_URL}",
                 "-e", f"ALL_PROXY={PROXY_URL}",
             ]
+        # pi and opencode go through OpenAI-compat path and want the active
+        # provider's native env var (claude doesn't need this — it reads
+        # ANTHROPIC_AUTH_TOKEN/ANTHROPIC_API_KEY already in podman_base).
+        if agent in ("pi", "opencode"):
+            nativeEnvMap = {
+                "openrouter": "OPENROUTER_API_KEY",
+                "groq": "GROQ_API_KEY",
+                "cerebras": "CEREBRAS_API_KEY",
+            }
+            nativeEnv = nativeEnvMap.get(provider)
+            nativeKey = env.get("OPENAI_API_KEY", "")
+            if nativeEnv and nativeKey:
+                podman_base += ["-e", f"{nativeEnv}={nativeKey}"]
         podman_base += [
             "-v", f"{cwd}:/workspace",
             "-w", "/workspace",
@@ -870,22 +883,15 @@ def ask_via_acpx(uid, text, sess):
                 "claude", "exec", text,
             ]
         elif agent == "pi":
-            # Pi supports only providers with native env var keys.
-            # No custom base URL support, so nvidia and others won't work.
-            piSupportedProviders = {"openrouter": "openrouter", "groq": "groq", "cerebras": "cerebras"}
-            pi_prov = piSupportedProviders.get(provider)
-            if not pi_prov:
-                supported = ", ".join(sorted(piSupportedProviders))
-                return (
-                    f"❌ Pi mode does not support provider `{provider}`. "
-                    f"Supported: {supported}.\n"
-                    f"Switch provider via /provider or use /mode native or /mode claude.",
-                    {"prompt_tokens": 0, "completion_tokens": 0},
-                    {"finish_reason": "pi_unsupported_provider", "tool_calls_total": 0, "error": f"unsupported provider {provider}", "session_id": session_uuid},
-                )
-            pi_cmd = ["pi", "-p", "--no-session", "--model", mode_model, "--provider", pi_prov]
-            pi_cmd.append(text)
+            # Direct invocation — pi-acp wrapper inside acpx pulls a different
+            # package via npx at runtime and fails auth. Native pi binary in
+            # the image accepts --provider with the native env var set above.
+            pi_cmd = ["pi", "-p", "--no-session", "--model", mode_model, "--provider", provider, text]
             run_cmd = podman_base + pi_cmd
+        elif agent == "opencode":
+            # opencode reads OPENAI_BASE_URL / OPENAI_API_KEY / provider-native
+            # env var, mirroring opx.sh. No ACP layer.
+            run_cmd = podman_base + ["opencode", "run", "--model", mode_model, "--", text]
         else:
             run_cmd = podman_base + [
                 "acpx", "--cwd", "/workspace", "--format", "text",
