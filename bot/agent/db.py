@@ -148,7 +148,7 @@ class DB:
     def get_session(uid):
         try:
             with DB.connectDb() as conn:
-                res = conn.execute("SELECT model, history_json, provider, tools_enabled, engine_mode, COALESCE(last_session_id, '') FROM sessions WHERE user_id = ?", (uid,)).fetchone()
+                res = conn.execute("SELECT model, history_json, provider, tools_enabled, engine_mode, COALESCE(last_session_id, ''), COALESCE(profile, 'beginner') FROM sessions WHERE user_id = ?", (uid,)).fetchone()
                 if res:
                     prov = res[2] or PROVIDER_DEFAULT
                     tools_enabled = (res[3] if len(res) > 3 else None)
@@ -156,7 +156,8 @@ class DB:
                         tools_enabled = 1 if PROVIDERS.get(prov, {}).get("supports_tools", True) else 0
                     engine_mode = (res[4] if len(res) > 4 else None) or "native"
                     last_session_id = (res[5] if len(res) > 5 else None) or ""
-                    return {"model": sanitize_model_id(res[0]), "history": json.loads(res[1]), "provider": prov, "tools_enabled": tools_enabled == 1, "engine_mode": engine_mode, "last_session_id": last_session_id}
+                    profile = (res[6] if len(res) > 6 else None) or "beginner"
+                    return {"model": sanitize_model_id(res[0]), "history": json.loads(res[1]), "provider": prov, "tools_enabled": tools_enabled == 1, "engine_mode": engine_mode, "last_session_id": last_session_id, "profile": profile}
                 # Brand-new session — pick top healthy text model for default provider, fall back to static default.
                 chosen = PROVIDERS[PROVIDER_DEFAULT]["default_model"]
                 try:
@@ -168,10 +169,10 @@ class DB:
                         chosen = row[0]
                 except Exception:
                     pass
-                return {"model": chosen, "history": [], "provider": PROVIDER_DEFAULT, "tools_enabled": True, "engine_mode": "native", "last_session_id": ""}
+                return {"model": chosen, "history": [], "provider": PROVIDER_DEFAULT, "tools_enabled": True, "engine_mode": "native", "last_session_id": "", "profile": "beginner"}
         except Exception as e:
             log.error(f"DB get_session: {e}")
-            return {"model": PROVIDERS[PROVIDER_DEFAULT]["default_model"], "history": [], "provider": PROVIDER_DEFAULT, "tools_enabled": True, "engine_mode": "native", "last_session_id": ""}
+            return {"model": PROVIDERS[PROVIDER_DEFAULT]["default_model"], "history": [], "provider": PROVIDER_DEFAULT, "tools_enabled": True, "engine_mode": "native", "last_session_id": "", "profile": "beginner"}
     @staticmethod
     def save_session(uid, model, history, provider=None, tools_enabled=True, engine_mode="native"):
         try:
@@ -195,6 +196,26 @@ class DB:
             DB.withRetry(op, "save_session")
         except Exception as e:
             log.error(f"DB save_session: {e}")
+    @staticmethod
+    def save_profile(uid, profile):
+        # Persist beginner/pro profile without touching the rest of the session state.
+        # Insert a row if the user has none yet so the column survives across restarts.
+        profile = profile if profile in ("beginner", "pro") else "beginner"
+        try:
+            def op():
+                with DB.connectDb() as conn:
+                    conn.execute(
+                        """
+                        INSERT INTO sessions (user_id, model, history_json, provider, tools_enabled, engine_mode, profile)
+                        VALUES (?, '', '[]', ?, 1, 'native', ?)
+                        ON CONFLICT(user_id) DO UPDATE SET profile=excluded.profile
+                        """,
+                        (uid, PROVIDER_DEFAULT, profile),
+                    )
+                    conn.commit()
+            DB.withRetry(op, "save_profile")
+        except Exception as e:
+            log.error(f"DB save_profile: {e}")
     @staticmethod
     def get_healthy_models(provider, category="text", limit=10):
         try:
