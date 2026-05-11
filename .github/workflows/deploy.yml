@@ -62,15 +62,21 @@ jobs:
             sudo rm -f /etc/cron.d/model-health-check /etc/cron.d/model-audio-check /etc/cron.d/model-media-check
             sudo touch /var/log/model-health-check.log /var/log/model-audio-check.log /var/log/model-media-check.log
 
-            # Build the sandbox image if it doesn't exist or file changed
-            if ! sudo podman inspect localhost/acpx-claude:latest >/dev/null 2>&1; then
-              sudo podman build -t acpx-claude:latest -f /usr/local/bin/Containerfile.acpx-claude
-            elif [ /usr/local/bin/Containerfile.acpx-claude -nt /var/lib/containers/storage ]; then
-              # Simple heuristic: rebuild if Containerfile is newer than some storage marker
-              # Actually, always building is safer but slower. Let's just build.
-              sudo podman build -t acpx-claude:latest -f /usr/local/bin/Containerfile.acpx-claude
+            # Rebuild the sandbox image only when Containerfile actually changed.
+            # Old mtime-based heuristic always triggered because `install` resets
+            # the source mtime on every deploy.
+            CF=/usr/local/bin/Containerfile.acpx-claude
+            HASH_FILE=${CF}.sha256
+            NEW_HASH=$(sudo sha256sum "$CF" | awk '{print $1}')
+            OLD_HASH=$(sudo cat "$HASH_FILE" 2>/dev/null || echo "")
+            if ! sudo podman inspect localhost/acpx-claude:latest >/dev/null 2>&1 || [ "$NEW_HASH" != "$OLD_HASH" ]; then
+              echo "acpx-claude: building (hash changed or image missing)"
+              sudo podman build -t acpx-claude:latest -f "$CF"
+              echo "$NEW_HASH" | sudo tee "$HASH_FILE" >/dev/null
+            else
+              echo "acpx-claude: up-to-date (hash $NEW_HASH)"
             fi
-            
+
             rm -rf /tmp/deploy-bot
             if [ -n "$BOT_PROXY_URL" ]; then
               sudo install -m 0600 /dev/null /etc/socks-monitor/vds-agent.env
