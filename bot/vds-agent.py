@@ -1639,6 +1639,12 @@ def process_update(upd, token, admin_id):
                 file_path, blob = tg_get_file_bytes(token, file_id)
                 stt_model = sess_for_media.get("model", "")
                 used_provider = sess_for_media.get("provider", PROVIDER_DEFAULT)
+                # If the active chat model isn't an STT/audio model, force the
+                # known-good groq whisper path. Otherwise transcribe gets called
+                # with e.g. qwen/qwen3-32b and the provider returns HTTP 400.
+                if not any(k in (stt_model or "").lower() for k in ("whisper", "speech-to-text", "stt")):
+                    stt_model = "whisper-large-v3-turbo"
+                    used_provider = "groq"
                 transcript, used_provider, used_model = transcribe_audio_with_fallback(
                     used_provider,
                     blob,
