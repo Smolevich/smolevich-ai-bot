@@ -295,6 +295,7 @@ def build_menu_settings(sess):
     kb += [
         [{"text": "🔄 Сброс истории", "callback_data": "menu:reset"}],
         [{"text": "📈 Статус", "callback_data": "menu:status"}],
+        [{"text": "📝 Отзыв", "callback_data": "menu:feedback"}],
         [{"text": "❓ Помощь", "callback_data": "menu:help"}],
         [{"text": "← Назад", "callback_data": "menu:back"}],
     ]
@@ -1022,6 +1023,7 @@ def ask_via_acpx(uid, text, sess):
 
 def handle_callback(cb, token, admin_id):
     uid = cb["from"]["id"]; data = cb.get("data", "")
+    log.info(f"Callback from {uid}: {data}")
     if data.startswith("set_provider:"):
         prov_name = data.split(":", 1)[1]; sess = DB.get_session(uid)
         default_model = PROVIDERS[prov_name]["default_model"]
@@ -1193,8 +1195,38 @@ def handle_callback(cb, token, admin_id):
             handle_command(uid, "", "/status", token, admin_id)
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Статус отправлен"})
         elif action == "help":
-            handle_command(uid, "", "/help", token, admin_id)
+            is_pro = sess.get("profile", "beginner") == "pro"
+            if is_pro:
+                help_txt = (
+                    "Привет! Я продвинутый AI-ассистент.\n"
+                    "Что я умею:\n"
+                    "💬 Общение с моделями текстом и кодом\n"
+                    "🛠 Использование инструментов (поиск, выполнение скриптов)\n"
+                    "🎙 Распознавание голоса (/stt) и озвучка (/tts)\n\n"
+                    "Настройки:\n"
+                    "• /menu — главное меню кнопками\n"
+                    "• /provider — выбор платформы\n"
+                    "• /models — выбор конкретной модели\n"
+                    "• /mode — режим работы (Native, Claude Code и др.)\n"
+                    "• /tools — включить/выключить инструменты\n"
+                    "• /feedback <текст> — отправить отзыв админу\n"
+                    "• /debug — режим отладки"
+                )
+            else:
+                help_txt = (
+                    "Привет! Я AI-ассистент.\n\n"
+                    "Просто напиши сообщение — я отвечу.\n"
+                    "🎙 Голосовое тоже принимаю (расшифрую).\n\n"
+                    "Кнопки и настройки — /menu\n"
+                    "Сбросить историю — /reset\n"
+                    "Отзыв админу — /feedback <текст>\n"
+                    "Все команды — /help advanced"
+                )
+            tg_request(token, "sendMessage", {"chat_id": uid, "text": help_txt})
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Помощь отправлена"})
+        elif action == "feedback":
+            tg_request(token, "sendMessage", {"chat_id": uid, "text": "📝 Чтобы отправить отзыв админу, напиши:\n/feedback <текст сообщения>"})
+            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Инструкция отправлена"})
         elif action == "top":
             tg_send_text(token, uid, build_top_text())
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Топ отправлен"})
