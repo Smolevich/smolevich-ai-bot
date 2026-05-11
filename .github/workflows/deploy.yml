@@ -8,11 +8,21 @@ on:
 
   workflow_dispatch:
 
+concurrency:
+  group: deploy-to-vds
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+
+      - name: Syntax preflight
+        run: |
+          python3 -m py_compile bot/vds-agent.py bot/migrate.py \
+            bot/model-health-check.py bot/model-audio-check.py bot/model-media-check.py \
+            bot/agent/*.py
 
       - name: Stamp version
         run: |
@@ -22,7 +32,7 @@ jobs:
           grep -E '^__VERSION__' bot/vds-agent.py
 
       - name: Copy files to server
-        uses: appleboy/scp-action@v0.1.7
+        uses: appleboy/scp-action@v1.0.0
         with:
           host: ${{ secrets.VDS_HOST }}
           port: ${{ secrets.VDS_PORT }}
@@ -34,7 +44,7 @@ jobs:
           strip_components: 1
 
       - name: Install, migrate, restart
-        uses: appleboy/ssh-action@v1.2.2
+        uses: appleboy/ssh-action@v1.2.5
         env:
           BOT_PROXY_URL: ${{ secrets.BOT_PROXY_URL }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
