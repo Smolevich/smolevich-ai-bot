@@ -250,6 +250,56 @@ def build_models_view(sess, category="text", limit=12):
     txt = f"Models ({prov}, {category}):"
     return txt, kb
 
+def build_menu_root(sess):
+    """Корневое inline-меню /menu. Доступно всем профилям."""
+    kb = [
+        [{"text": "💬 Чат", "callback_data": "menu:chat"},
+         {"text": "🎙 Голос", "callback_data": "menu:voice"}],
+        [{"text": "🛠 Код", "callback_data": "menu:code"},
+         {"text": "🖼 Картинки", "callback_data": "menu:image"}],
+        [{"text": "⚙️ Настройки", "callback_data": "menu:settings"}],
+    ]
+    txt = (
+        "🤖 Что хочешь сделать?\n\n"
+        "💬 Чат — пиши текст, отвечу.\n"
+        "🎙 Голос — пришли голосовое или текст для озвучки.\n"
+        "🛠 Код — задача в песочнице (Claude Code).\n"
+        "🖼 Картинки — генерация и анализ изображений.\n"
+        "⚙️ Настройки — модель, провайдер, профиль."
+    )
+    return txt, kb
+
+def build_menu_settings(sess):
+    """Сабменю настроек. В Профи появляются дополнительные кнопки."""
+    profile = sess.get("profile", "beginner")
+    model = sess.get("model", "")
+    prov = sess.get("provider", PROVIDER_DEFAULT)
+    mode = sess.get("engine_mode", "native")
+    model_short = model.split("/")[-1] if "/" in model else model
+    if len(model_short) > 30:
+        model_short = model_short[:27] + "…"
+    profile_label = "Новичок" if profile == "beginner" else "Профи"
+    kb = [
+        [{"text": f"🤖 Модель: {model_short}", "callback_data": "menu:model"}],
+        [{"text": f"🔌 Провайдер: {prov}", "callback_data": "menu:provider"}],
+        [{"text": f"👤 Профиль: {profile_label}", "callback_data": "menu:profile_toggle"}],
+    ]
+    if profile == "pro":
+        tools_on = sess.get("tools_enabled", True)
+        kb += [
+            [{"text": f"🛠 Mode: {mode}", "callback_data": "menu:mode"}],
+            [{"text": f"🧰 Tools: {'on' if tools_on else 'off'}", "callback_data": "menu:tools"}],
+            [{"text": "🏆 Топ моделей", "callback_data": "menu:top"}],
+            [{"text": "🐛 Debug", "callback_data": "menu:debug"}],
+        ]
+    kb += [
+        [{"text": "🔄 Сброс истории", "callback_data": "menu:reset"}],
+        [{"text": "📈 Статус", "callback_data": "menu:status"}],
+        [{"text": "❓ Помощь", "callback_data": "menu:help"}],
+        [{"text": "← Назад", "callback_data": "menu:back"}],
+    ]
+    return "⚙️ Настройки", kb
+
 def groq_transcribe_audio(audio_bytes, filename="audio.ogg", language="ru", model="whisper-large-v3-turbo"):
     api_key = load_provider_key(STT_PROVIDER)
     if not api_key:
@@ -1071,6 +1121,78 @@ def handle_callback(cb, token, admin_id):
         if os.path.exists(u_dir): shutil.rmtree(u_dir); os.makedirs(u_dir)
         tg_request(token, "editMessageText", {"chat_id": cb["message"]["chat"]["id"], "message_id": cb["message"]["message_id"], "text": cb["message"].get("text", "") + "\n\n✅ Context reset done."})
         tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Reset done."})
+    elif data.startswith("menu:"):
+        action = data.split(":", 1)[1]
+        chat_id = cb["message"]["chat"]["id"]
+        msg_id = cb["message"]["message_id"]
+        sess = DB.get_session(uid)
+        if action == "back":
+            m_txt, m_kb = build_menu_root(sess)
+            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": m_txt, "reply_markup": {"inline_keyboard": m_kb}})
+        elif action == "settings":
+            s_txt, s_kb = build_menu_settings(sess)
+            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": s_txt, "reply_markup": {"inline_keyboard": s_kb}})
+        elif action == "chat":
+            DB.save_session(uid, sess["model"], sess["history"], provider=sess["provider"], tools_enabled=sess["tools_enabled"], engine_mode="native")
+            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": "💬 Чат-режим включён.\nПиши обычный текст — я отвечу.", "reply_markup": {"inline_keyboard": [[{"text": "← Назад", "callback_data": "menu:back"}]]}})
+            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Чат"})
+        elif action == "code":
+            DB.save_session(uid, sess["model"], sess["history"], provider=sess["provider"], tools_enabled=sess["tools_enabled"], engine_mode="claude")
+            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": "🛠 Код-режим (Claude Code) включён.\nОтправь задачу — выполню в песочнице.", "reply_markup": {"inline_keyboard": [[{"text": "← Назад", "callback_data": "menu:back"}]]}})
+            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Код"})
+        elif action == "voice":
+            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": "🎙 Голос\nПришли голосовое — расшифрую.\nИли используй /tts <текст> для озвучки.", "reply_markup": {"inline_keyboard": [[{"text": "← Назад", "callback_data": "menu:back"}]]}})
+            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Голос"})
+        elif action == "image":
+            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": "🖼 Картинки\nИспользуй /video для анализа видео или меню /models → переключи на Image для генерации (если у провайдера есть).", "reply_markup": {"inline_keyboard": [[{"text": "← Назад", "callback_data": "menu:back"}]]}})
+            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Картинки"})
+        elif action == "profile_toggle":
+            new_profile = "pro" if sess.get("profile", "beginner") == "beginner" else "beginner"
+            DB.save_profile(uid, new_profile)
+            sess["profile"] = new_profile
+            s_txt, s_kb = build_menu_settings(sess)
+            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": s_txt, "reply_markup": {"inline_keyboard": s_kb}})
+            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": f"Профиль: {'Профи' if new_profile == 'pro' else 'Новичок'}"})
+        elif action == "model":
+            m_txt, m_kb = build_models_view(sess, category="text", limit=12)
+            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": m_txt, "reply_markup": {"inline_keyboard": m_kb}})
+        elif action == "provider":
+            avail = available_providers()
+            kb = [[{"text": f"{'✅ ' if name == sess['provider'] else ''}{name}", "callback_data": f"set_provider:{name}"}] for name in avail]
+            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": "Provider:", "reply_markup": {"inline_keyboard": kb}})
+        elif action == "reset":
+            DB.save_session(uid, sess["model"], [], provider=sess["provider"], tools_enabled=sess["tools_enabled"], engine_mode=sess.get("engine_mode", "native"))
+            DB.set_last_session_id(uid, "")
+            with runtimeStatusLock:
+                runtimeStatus.pop(uid, None)
+            u_dir = os.path.join(SESSIONS_ROOT, str(uid))
+            if os.path.exists(u_dir): shutil.rmtree(u_dir); os.makedirs(u_dir)
+            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": "✅ История сброшена.", "reply_markup": {"inline_keyboard": [[{"text": "← Назад", "callback_data": "menu:back"}]]}})
+            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Сброшено"})
+        elif action == "status":
+            handle_command(uid, "", "/status", token, admin_id)
+            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Статус отправлен"})
+        elif action == "help":
+            handle_command(uid, "", "/help", token, admin_id)
+            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Помощь отправлена"})
+        elif action == "top":
+            tg_send_text(token, uid, build_top_text())
+            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Топ отправлен"})
+        elif action == "mode":
+            kb = [
+                [{"text": f"{'✅ ' if sess.get('engine_mode', 'native') == 'native' else ''}Native", "callback_data": "set_mode:native"}],
+                [{"text": f"{'✅ ' if sess.get('engine_mode', 'native') == 'claude' else ''}Claude Code", "callback_data": "set_mode:claude"}],
+                [{"text": f"{'✅ ' if sess.get('engine_mode', 'native') == 'opencode' else ''}OpenCode", "callback_data": "set_mode:opencode"}],
+                [{"text": f"{'✅ ' if sess.get('engine_mode', 'native') == 'pi' else ''}Pi", "callback_data": "set_mode:pi"}],
+            ]
+            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": "Select mode:", "reply_markup": {"inline_keyboard": kb}})
+        elif action == "tools":
+            kb = [[{"text": f"{'✅ ' if sess.get('tools_enabled', True) else ''}On", "callback_data": "set_tools:on"},
+                   {"text": f"{'✅ ' if not sess.get('tools_enabled', True) else ''}Off", "callback_data": "set_tools:off"}]]
+            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": "Tools usage:", "reply_markup": {"inline_keyboard": kb}})
+        elif action == "debug":
+            handle_command(uid, "", "/debug", token, admin_id)
+            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Debug отправлен"})
 
 def handle_command(uid, username, text, token, admin_id):
     if text == "/start" or text == "/help":
@@ -1088,6 +1210,10 @@ def handle_command(uid, username, text, token, admin_id):
             "• /debug — режим отладки (техническая информация)"
         )
         tg_request(token, "sendMessage", {"chat_id": uid, "text": txt})
+    elif text == "/menu":
+        sess = DB.get_session(uid)
+        m_txt, m_kb = build_menu_root(sess)
+        tg_request(token, "sendMessage", {"chat_id": uid, "text": m_txt, "reply_markup": {"inline_keyboard": m_kb}})
     elif text == "/reset":
         sess = DB.get_session(uid)
         DB.save_session(uid, sess["model"], [], provider=sess["provider"], tools_enabled=sess["tools_enabled"], engine_mode=sess.get("engine_mode", "native"))
