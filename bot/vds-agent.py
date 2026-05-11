@@ -889,9 +889,17 @@ def ask_via_acpx(uid, text, sess):
             pi_cmd = ["pi", "-p", "--no-session", "--model", mode_model, "--provider", provider, text]
             run_cmd = podman_base + pi_cmd
         elif agent == "opencode":
-            # opencode reads OPENAI_BASE_URL / OPENAI_API_KEY / provider-native
-            # env var, mirroring opx.sh. No ACP layer.
-            run_cmd = podman_base + ["opencode", "run", "--model", mode_model, "--", text]
+            # `opencode run` needs an interactive auth setup that doesn't apply
+            # in our ephemeral cwd. Route through opencode's ACP server via the
+            # acpx --agent escape hatch — opencode picks up the provider from
+            # the env vars below and skips its own credentials store.
+            run_cmd = podman_base + [
+                "acpx", "--agent", "opencode acp",
+                "--cwd", "/workspace", "--format", "text",
+                "--approve-all", "--non-interactive-permissions", "deny",
+                "--timeout", acpx_timeout,
+                "exec", text,
+            ]
         else:
             run_cmd = podman_base + [
                 "acpx", "--cwd", "/workspace", "--format", "text",
