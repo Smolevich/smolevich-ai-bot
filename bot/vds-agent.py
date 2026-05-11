@@ -1744,11 +1744,21 @@ def process_update(upd, token, admin_id):
             if is_subscribed(token, uid): DB.set_allowed(uid, True); allowed = True
             else:
                 kb = [
-                    [{"text": "Sub", "url": f"https://t.me/{REQUIRED_CHANNEL.lstrip('@')}"}],
-                    [{"text": "✅ Done", "callback_data": "check_sub"}],
-                    [{"text": "📝 Request access", "callback_data": "request_access"}],
+                    [{"text": f"📢 Подписаться на {REQUIRED_CHANNEL}", "url": f"https://t.me/{REQUIRED_CHANNEL.lstrip('@')}"}],
+                    [{"text": "✅ Я подписался — проверить", "callback_data": "check_sub"}],
+                    [{"text": "📝 Запросить доступ без подписки", "callback_data": "request_access"}],
                 ]
-                tg_request(token, "sendMessage", {"chat_id": uid, "text": f"Sub to {REQUIRED_CHANNEL}\n\nЕсли не хотите подписываться, нажмите «Request access».", "reply_markup": {"inline_keyboard": kb}})
+                welcome = (
+                    "Привет! Я AI-ассистент.\n\n"
+                    "Что умею:\n"
+                    "💬 Чат с большими моделями (бесплатные, без VPN)\n"
+                    "🎙 Распознавание голосовых сообщений\n"
+                    "🔊 Озвучка текста в аудио\n"
+                    "🛠 Запуск кода в песочнице\n\n"
+                    f"Чтобы начать, подпишись на канал {REQUIRED_CHANNEL} — после этого доступ откроется автоматически. "
+                    "Или нажми «Запросить доступ» и я отправлю заявку админу."
+                )
+                tg_request(token, "sendMessage", {"chat_id": uid, "text": welcome, "reply_markup": {"inline_keyboard": kb}})
                 return
         if text.startswith("/"): return handle_command(uid, username, text, token, admin_id)
 
