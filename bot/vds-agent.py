@@ -51,6 +51,8 @@ inflightUsers = set()
 inflightUsersLock = threading.Lock()
 inflightBusyNoticeTs = {}
 INFLIGHT_BUSY_NOTICE_COOLDOWN_SEC = 8
+pendingTextByUser = {}
+pendingTextByUserLock = threading.Lock()
 recentUpdateIds = {}
 recentUpdateIdsLock = threading.Lock()
 RECENT_UPDATE_TTL_SEC = 180
@@ -59,6 +61,8 @@ runtimeStatus = {}
 runtimeStatusLock = threading.Lock()
 pendingSttUsers = set()
 pendingSttUsersLock = threading.Lock()
+pendingTranslateUsers = set()
+pendingTranslateUsersLock = threading.Lock()
 DEBUG_USERS = set()
 DEBUG_USERS_LOCK = threading.Lock()
 TELEGRAM_BOT_FILE_DOWNLOAD_LIMIT_BYTES = 20 * 1024 * 1024
@@ -1478,6 +1482,25 @@ def process_update(upd, token, admin_id):
         username = fi.get("username") or f"{fi.get('first_name', '')} {fi.get('last_name', '')}".strip()
         log.info(f"Update from {uid} ({username}): {text}")
 
+        lower_text = text.strip().lower()
+        translate_cmds = {
+            "переведи на русский",
+            "переведи на русский:",
+            "translate to russian",
+            "translate to russian:",
+        }
+        with pendingTranslateUsersLock:
+            waiting_translate_text = uid in pendingTranslateUsers
+        if waiting_translate_text and not lower_text.startswith("/"):
+            text = f"Переведи на русский:\n\n{text}"
+            with pendingTranslateUsersLock:
+                pendingTranslateUsers.discard(uid)
+        elif lower_text in translate_cmds:
+            with pendingTranslateUsersLock:
+                pendingTranslateUsers.add(uid)
+            tg_send_text(token, uid, "Ок. Пришлите текст следующим сообщением — переведу на русский без привязки к предыдущей теме.")
+            return
+
         allowed = DB.update_and_check(uid, username)
         if uid == admin_id: allowed = True
         if not allowed:
@@ -1496,8 +1519,14 @@ def process_update(upd, token, admin_id):
             if uid in inflightUsers:
                 now_ts = time.time()
                 last_notice_ts = inflightBusyNoticeTs.get(uid, 0)
+                with pendingTextByUserLock:
+                    pendingTextByUser[uid] = {
+                        "text": text,
+                        "from": fi,
+                        "chat_id": msg.get("chat", {}).get("id", uid),
+                    }
                 if now_ts - last_notice_ts >= INFLIGHT_BUSY_NOTICE_COOLDOWN_SEC:
-                    tg_send_text(token, uid, "⏳ Previous request is still running. Please wait for it to finish.")
+                    tg_send_text(token, uid, "⏳ Previous request is still running. I saved your latest message and will process it next.")
                     inflightBusyNoticeTs[uid] = now_ts
                 return
             inflightUsers.add(uid)
@@ -1578,9 +1607,26 @@ def process_update(upd, token, admin_id):
         txt_parsed, ents = parse_markdown_to_entities(raw_reply)
         send_res = tg_send_long_text(token, uid, txt_parsed, entities=ents, reply_markup=kb)
         DB.set_request_delivered(req_id, bool(send_res.get("ok")))
+        queued = None
+        with pendingTextByUserLock:
+            queued = pendingTextByUser.pop(uid, None)
         with inflightUsersLock:
             inflightUsers.discard(uid)
             inflightBusyNoticeTs.pop(uid, None)
+        if queued and queued.get("text"):
+            try:
+                synthetic_upd = {
+                    "update_id": int(time.time() * 1000),
+                    "message": {
+                        "message_id": int(time.time() * 1000) % 1000000000,
+                        "from": queued.get("from") or {"id": uid},
+                        "chat": {"id": queued.get("chat_id", uid)},
+                        "text": queued.get("text", ""),
+                    },
+                }
+                executorPool.submit(process_update, synthetic_upd, token, admin_id)
+            except Exception as e:
+                log.warning(f"Failed to schedule queued message for uid={uid}: {e}")
     except Exception as e:
         log.error(f"process_update error: {e}", exc_info=True)
         try:
