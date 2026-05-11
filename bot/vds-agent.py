@@ -799,6 +799,8 @@ def ask_via_acpx(uid, text, sess):
         claude_cfg_dir = os.path.join(cwd, ".claude")
         try:
             os.makedirs(claude_cfg_dir, exist_ok=True)
+            # Container runs as uid 1000; claude-code writes state into CLAUDE_CONFIG_DIR.
+            os.chmod(claude_cfg_dir, 0o777)
             settings_path = os.path.join(claude_cfg_dir, "settings.json")
             with open(settings_path, "w", encoding="utf-8") as f:
                 json.dump({"permissions": {"defaultMode": "bypassPermissions"}}, f)
