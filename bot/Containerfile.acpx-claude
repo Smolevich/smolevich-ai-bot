@@ -1,6 +1,6 @@
 FROM docker.io/library/python:3.11-alpine
 
 RUN apk add --no-cache nodejs npm git bash \
-    && npm i -g @anthropic-ai/claude-code acpx@latest @mariozechner/pi-coding-agent
+    && npm i -g @anthropic-ai/claude-code acpx@latest @mariozechner/pi-coding-agent @agentclientprotocol/claude-agent-acp
 
 WORKDIR /workspace
