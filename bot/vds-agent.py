@@ -49,6 +49,11 @@ log = logging.getLogger(__name__)
 # Per-user in-flight guard: avoid parallel runs for the same chat user.
 inflightUsers = set()
 inflightUsersLock = threading.Lock()
+inflightBusyNoticeTs = {}
+INFLIGHT_BUSY_NOTICE_COOLDOWN_SEC = 8
+recentUpdateIds = {}
+recentUpdateIdsLock = threading.Lock()
+RECENT_UPDATE_TTL_SEC = 180
 executorPool = ThreadPoolExecutor(max_workers=10)
 runtimeStatus = {}
 runtimeStatusLock = threading.Lock()
@@ -1257,6 +1262,18 @@ def build_top_text():
 
 def process_update(upd, token, admin_id):
     try:
+        upd_id = upd.get("update_id")
+        if upd_id is not None:
+            now_ts = time.time()
+            with recentUpdateIdsLock:
+                # Cleanup stale ids and reject duplicates from Telegram webhook retries.
+                stale_ids = [k for k, ts in recentUpdateIds.items() if now_ts - ts > RECENT_UPDATE_TTL_SEC]
+                for k in stale_ids:
+                    recentUpdateIds.pop(k, None)
+                if upd_id in recentUpdateIds:
+                    log.info(f"Duplicate update ignored: {upd_id}")
+                    return
+                recentUpdateIds[upd_id] = now_ts
         cb = upd.get("callback_query")
         if cb: return handle_callback(cb, token, admin_id)
         msg = upd.get("message")
@@ -1477,7 +1494,11 @@ def process_update(upd, token, admin_id):
 
         with inflightUsersLock:
             if uid in inflightUsers:
-                tg_send_text(token, uid, "⏳ Previous request is still running. Please wait for it to finish.")
+                now_ts = time.time()
+                last_notice_ts = inflightBusyNoticeTs.get(uid, 0)
+                if now_ts - last_notice_ts >= INFLIGHT_BUSY_NOTICE_COOLDOWN_SEC:
+                    tg_send_text(token, uid, "⏳ Previous request is still running. Please wait for it to finish.")
+                    inflightBusyNoticeTs[uid] = now_ts
                 return
             inflightUsers.add(uid)
 
@@ -1559,12 +1580,14 @@ def process_update(upd, token, admin_id):
         DB.set_request_delivered(req_id, bool(send_res.get("ok")))
         with inflightUsersLock:
             inflightUsers.discard(uid)
+            inflightBusyNoticeTs.pop(uid, None)
     except Exception as e:
         log.error(f"process_update error: {e}", exc_info=True)
         try:
             if 'uid' in locals() and uid is not None:
                 with inflightUsersLock:
                     inflightUsers.discard(uid)
+                    inflightBusyNoticeTs.pop(uid, None)
         except Exception:
             pass
 

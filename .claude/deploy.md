@@ -23,7 +23,7 @@ Required GitHub secrets: `VDS_HOST`, `VDS_PORT`, `VDS_USER`, `VDS_SSH_KEY`, `VDS
 ./deploy.sh
 ```
 
-Ships `bot/vds-agent.py` only and restarts the service. Use the GitHub workflow if you also need to push migrations / cron scripts / the systemd unit. Requires the `vscale` SSH host alias in `~/.ssh/config`.
+Ships `bot/vds-agent.py` only and restarts the service. Use the GitHub workflow if you also need to push migrations / cron scripts / the systemd unit. Requires your private SSH host alias in `~/.ssh/config` (examples below use `<bot-server>`).
 
 ## Cron jobs (provisioned manually on the server)
 
@@ -37,10 +37,10 @@ The cron files themselves are not in CI — set them up once per host.
 
 ```
 gh run list --limit 5
-ssh vscale 'systemctl is-active vds-agent'
-ssh vscale 'journalctl -u vds-agent -n 50'
-ssh vscale 'tail -n 50 /var/log/model-health-check.log'
-ssh vscale 'tail -n 50 /var/log/model-audio-check.log'
+ssh <bot-server> 'systemctl is-active vds-agent'
+ssh <bot-server> 'journalctl -u vds-agent -n 50'
+ssh <bot-server> 'tail -n 50 /var/log/model-health-check.log'
+ssh <bot-server> 'tail -n 50 /var/log/model-audio-check.log'
 ```
 
 ## Telegram command menu refresh
@@ -50,8 +50,8 @@ ssh vscale 'tail -n 50 /var/log/model-audio-check.log'
 Server-side checks:
 
 ```
-ssh vscale 'systemctl restart vds-agent'
-ssh vscale 'journalctl -u vds-agent -n 80 --no-pager'
+ssh <bot-server> 'systemctl restart vds-agent'
+ssh <bot-server> 'journalctl -u vds-agent -n 80 --no-pager'
 ```
 
 Client-side refresh (if `/stt`/`/tts` still not visible):

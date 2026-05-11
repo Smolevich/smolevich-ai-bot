@@ -19,7 +19,7 @@ Each bot path can be overridden via the matching `BOT_*` env var.
 
 - `BOT_TUNNEL_URL` — public webhook URL (`https://ai.smolevich.com`).
 - `BOT_REQUIRED_CHANNEL` — Telegram channel used for the subscription gate.
-- `BOT_PROXY_URL` — SOCKS proxy for providers with geo restrictions (Groq, Cerebras).
+- `BOT_PROXY_URL` — optional SOCKS proxy override for outbound provider traffic; on current Hetzner setup it is usually not needed and can stay empty.
 
 ## Server-side binaries
 

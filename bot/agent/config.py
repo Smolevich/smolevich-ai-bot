@@ -30,7 +30,7 @@ PROVIDERS: dict[str, dict[str, Any]] = {
         "key_file": "/etc/socks-monitor/.groq_key",
         "default_model": "llama-3.3-70b-versatile",
         "supports_tools": True,
-        "proxy": True,
+        "proxy": False,
     },
     "cerebras": {
         "url": "https://api.cerebras.ai/v1/chat/completions",
@@ -39,7 +39,7 @@ PROVIDERS: dict[str, dict[str, Any]] = {
         "key_file": "/etc/socks-monitor/.cerebras_key",
         "default_model": "llama-3.3-70b",
         "supports_tools": False,
-        "proxy": True,
+        "proxy": False,
     },
     "nvidia": {
         "url": "https://integrate.api.nvidia.com/v1/chat/completions",

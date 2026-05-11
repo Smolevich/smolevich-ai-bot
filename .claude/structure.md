@@ -16,7 +16,7 @@ Everything bot-related lives in `bot/`:
 
 Top-level:
 
-- `deploy.sh` — manual bot-only deploy via the `vscale` SSH host alias.
+- `deploy.sh` — manual bot-only deploy via your private SSH host alias.
 - `.github/workflows/deploy.yml` — auto-deploy on push to `main`.
 - `.env.example` — every env var.
 
