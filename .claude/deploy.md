@@ -19,6 +19,18 @@ After copying, the workflow runs `systemctl daemon-reload`, `migrate_bot_db`, th
 
 Required GitHub secrets: `VDS_HOST`, `VDS_PORT`, `VDS_USER`, `VDS_SSH_KEY`, `VDS_SSH_PASSPHRASE`.
 
+### Important: confirm deploy status in GitHub Actions
+
+`git push` means only code upload to GitHub. Actual server deploy can still fail.
+Always check the workflow result after push:
+
+```
+gh run list --branch main --limit 5
+gh run view <run_id> --log-failed
+```
+
+Deploy is considered complete only when workflow `Deploy to VDS` has `completed/success`.
+
 ## Manual (bot only)
 
 ```
