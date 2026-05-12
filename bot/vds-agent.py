@@ -1330,7 +1330,17 @@ def handle_command(uid, username, text, token, admin_id):
         if provider == "openrouter":
             or_limits = fetch_openrouter_key_limits(load_provider_key("openrouter"))
             if or_limits:
-                rl_text = ", ".join([f"{k}={or_limits[k]}" for k in sorted(or_limits.keys())])
+                parts = []
+                tier = "free" if or_limits.get("is_free_tier") else "paid"
+                parts.append(f"tier={tier}")
+                usage = or_limits.get("usage")
+                if isinstance(usage, (int, float)):
+                    parts.append(f"usage=${usage:.2f}")
+                for k in ("limit_remaining", "credits_remaining"):
+                    v = or_limits.get(k)
+                    if isinstance(v, (int, float)):
+                        parts.append(f"{k}=${v:.2f}")
+                rl_text = ", ".join(parts)
             else:
                 rl_text = "n/a (openrouter key-limits unavailable)"
         elif provider in ("groq", "cerebras"):
