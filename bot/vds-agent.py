@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import urllib.error
 import shlex
+import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -285,10 +286,13 @@ def build_menu_settings(sess):
     if len(model_short) > 30:
         model_short = model_short[:27] + "…"
     profile_label = "Новичок" if profile == "beginner" else "Профи"
+    ui_lang = sess.get("ui_lang", "ru")
+    lang_label = "RU" if ui_lang == "ru" else "EN"
     kb = [
         [{"text": f"🤖 Модель: {model_short}", "callback_data": "menu:model"}],
         [{"text": f"🔌 Провайдер: {prov}", "callback_data": "menu:provider"}],
         [{"text": f"👤 Профиль: {profile_label}", "callback_data": "menu:profile_toggle"}],
+        [{"text": f"🌐 Язык: {lang_label}", "callback_data": "menu:lang_toggle"}],
     ]
     if profile == "pro":
         tools_on = sess.get("tools_enabled", True)
@@ -574,6 +578,49 @@ def set_user_commands(token, uid, profile):
     res = tg_request(token, "setMyCommands", payload)
     if not res.get("ok"):
         log.warning(f"setMyCommands per-chat failed for uid={uid}: {res}")
+
+
+def format_video_analysis(raw_analysis, lang="ru", caption_text=""):
+    text = (raw_analysis or "").strip()
+    verdict_match = re.search(r"\*(Synthetic|Real)\*\s*\(confidence\s*([\d.]+)%\)", text, re.IGNORECASE)
+    prob_match = re.search(r"P\(synthetic\)\s*=\s*([\d.]+)", text, re.IGNORECASE)
+    frames_match = re.search(r"frames analyzed:\s*(\d+)", text, re.IGNORECASE)
+    if not verdict_match:
+        return text
+
+    verdict_raw = verdict_match.group(1).lower()
+    confidence_pct = float(verdict_match.group(2))
+    synthetic_prob = float(prob_match.group(1)) if prob_match else (confidence_pct / 100.0 if verdict_raw == "synthetic" else max(0.0, 1.0 - (confidence_pct / 100.0)))
+    frames_count = int(frames_match.group(1)) if frames_match else 0
+
+    if lang == "en":
+        verdict_text = "likely AI-generated/synthetic video" if verdict_raw == "synthetic" else "likely real video"
+        risk_line = "High likelihood of synthetic content." if synthetic_prob >= 0.85 else ("Medium likelihood of synthetic content." if synthetic_prob >= 0.60 else "Low likelihood of synthetic content.")
+        lines = [
+            f"🕵️ Video analysis result: {verdict_text}",
+            f"Model confidence: {confidence_pct:.2f}%",
+            f"Estimated synthetic probability: {synthetic_prob * 100:.2f}%",
+            f"Frames analyzed: {frames_count}",
+            risk_line,
+            "Note: this is a probabilistic detector output, not absolute proof.",
+        ]
+        if caption_text:
+            lines.insert(0, f"Context: {caption_text}")
+        return "\n".join(lines)
+
+    verdict_text = "вероятно синтетическое (AI) видео" if verdict_raw == "synthetic" else "вероятно реальное видео"
+    risk_line = "Высокая вероятность синтетики." if synthetic_prob >= 0.85 else ("Средняя вероятность синтетики." if synthetic_prob >= 0.60 else "Низкая вероятность синтетики.")
+    lines = [
+        f"🕵️ Результат анализа видео: {verdict_text}",
+        f"Уверенность модели: {confidence_pct:.2f}%",
+        f"Оценка вероятности синтетики: {synthetic_prob * 100:.2f}%",
+        f"Кадров проанализировано: {frames_count}",
+        risk_line,
+        "Важно: это вероятностная оценка модели, а не абсолютное доказательство.",
+    ]
+    if caption_text:
+        lines.insert(0, f"📝 Контекст: {caption_text}")
+    return "\n".join(lines)
 
 def set_bot_commands(token):
     # Global default scope = beginner-friendly minimum. Per-user override is
@@ -1194,6 +1241,13 @@ def handle_callback(cb, token, admin_id):
                 pendingVideoUsers.add(uid)
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": "🎬 Видео-режим включён.\nМодель: nvidia/ai-synthetic-video-detector\nПришли видеофайл (можно с подписью-текстом).", "reply_markup": {"inline_keyboard": [[{"text": "← Назад", "callback_data": "menu:back"}]]}})
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Видео"})
+        elif action == "lang_toggle":
+            new_lang = "en" if sess.get("ui_lang", "ru") == "ru" else "ru"
+            DB.save_session(uid, sess["model"], sess["history"], provider=sess["provider"], tools_enabled=sess["tools_enabled"], engine_mode=sess.get("engine_mode", "native"), ui_lang=new_lang)
+            sess["ui_lang"] = new_lang
+            s_txt, s_kb = build_menu_settings(sess)
+            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": s_txt, "reply_markup": {"inline_keyboard": s_kb}})
+            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": f"Language: {'EN' if new_lang == 'en' else 'RU'}"})
         elif action == "profile_toggle":
             new_profile = "pro" if sess.get("profile", "beginner") == "beginner" else "beginner"
             DB.save_profile(uid, new_profile)
@@ -1652,9 +1706,9 @@ def process_update(upd, token, admin_id):
                     error=None if analysis else "empty_analysis",
                 )
                 caption_text = str((msg.get("caption") or "")).strip()
-                prefix = f"📝 Контекст: {caption_text}\n\n" if caption_text else ""
+                lang = sess_for_media.get("ui_lang", "ru")
                 if analysis:
-                    tg_send_long_text(token, uid, f"{prefix}🕵️ Video analysis:\n{analysis}")
+                    tg_send_long_text(token, uid, format_video_analysis(analysis, lang=lang, caption_text=caption_text))
                 else:
                     tg_send_text(token, uid, "⚠️ Empty video analysis result.")
             except Exception as e:

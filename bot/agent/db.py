@@ -49,6 +49,10 @@ class DB:
                 except Exception:
                     pass
                 try:
+                    conn.execute("ALTER TABLE sessions ADD COLUMN ui_lang TEXT DEFAULT 'ru'")
+                except Exception:
+                    pass
+                try:
                     conn.execute("ALTER TABLE users ADD COLUMN message_count INTEGER DEFAULT 0")
                 except Exception:
                     pass
@@ -148,7 +152,7 @@ class DB:
     def get_session(uid):
         try:
             with DB.connectDb() as conn:
-                res = conn.execute("SELECT model, history_json, provider, tools_enabled, engine_mode, COALESCE(last_session_id, ''), COALESCE(profile, 'beginner') FROM sessions WHERE user_id = ?", (uid,)).fetchone()
+                res = conn.execute("SELECT model, history_json, provider, tools_enabled, engine_mode, COALESCE(last_session_id, ''), COALESCE(profile, 'beginner'), COALESCE(ui_lang, 'ru') FROM sessions WHERE user_id = ?", (uid,)).fetchone()
                 if res:
                     prov = res[2] or PROVIDER_DEFAULT
                     tools_enabled = (res[3] if len(res) > 3 else None)
@@ -157,31 +161,34 @@ class DB:
                     engine_mode = (res[4] if len(res) > 4 else None) or "native"
                     last_session_id = (res[5] if len(res) > 5 else None) or ""
                     profile = (res[6] if len(res) > 6 else None) or "beginner"
-                    return {"model": sanitize_model_id(res[0]), "history": json.loads(res[1]), "provider": prov, "tools_enabled": tools_enabled == 1, "engine_mode": engine_mode, "last_session_id": last_session_id, "profile": profile}
+                    ui_lang = (res[7] if len(res) > 7 else None) or "ru"
+                    return {"model": sanitize_model_id(res[0]), "history": json.loads(res[1]), "provider": prov, "tools_enabled": tools_enabled == 1, "engine_mode": engine_mode, "last_session_id": last_session_id, "profile": profile, "ui_lang": ui_lang}
                 # Brand-new session — pick historically best healthy text model; fall back to fastest healthy; then to static default.
                 chosen = DB.pick_default_text_model(PROVIDER_DEFAULT)
-                return {"model": chosen, "history": [], "provider": PROVIDER_DEFAULT, "tools_enabled": True, "engine_mode": "native", "last_session_id": "", "profile": "beginner"}
+                return {"model": chosen, "history": [], "provider": PROVIDER_DEFAULT, "tools_enabled": True, "engine_mode": "native", "last_session_id": "", "profile": "beginner", "ui_lang": "ru"}
         except Exception as e:
             log.error(f"DB get_session: {e}")
-            return {"model": PROVIDERS[PROVIDER_DEFAULT]["default_model"], "history": [], "provider": PROVIDER_DEFAULT, "tools_enabled": True, "engine_mode": "native", "last_session_id": "", "profile": "beginner"}
+            return {"model": PROVIDERS[PROVIDER_DEFAULT]["default_model"], "history": [], "provider": PROVIDER_DEFAULT, "tools_enabled": True, "engine_mode": "native", "last_session_id": "", "profile": "beginner", "ui_lang": "ru"}
     @staticmethod
-    def save_session(uid, model, history, provider=None, tools_enabled=True, engine_mode="native"):
+    def save_session(uid, model, history, provider=None, tools_enabled=True, engine_mode="native", ui_lang=None):
         try:
             model = sanitize_model_id(model)
+            safe_ui_lang = ui_lang if ui_lang in ("ru", "en") else None
             def op():
                 with DB.connectDb() as conn:
                     conn.execute(
                         """
-                        INSERT INTO sessions (user_id, model, history_json, provider, tools_enabled, engine_mode)
-                        VALUES (?, ?, ?, ?, ?, ?)
+                        INSERT INTO sessions (user_id, model, history_json, provider, tools_enabled, engine_mode, ui_lang)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(user_id) DO UPDATE SET
                             model=excluded.model,
                             history_json=excluded.history_json,
                             provider=excluded.provider,
                             tools_enabled=excluded.tools_enabled,
-                            engine_mode=excluded.engine_mode
+                            engine_mode=excluded.engine_mode,
+                            ui_lang=COALESCE(excluded.ui_lang, sessions.ui_lang)
                         """,
-                        (uid, model, json.dumps(history), provider or PROVIDER_DEFAULT, 1 if tools_enabled else 0, engine_mode or "native"),
+                        (uid, model, json.dumps(history), provider or PROVIDER_DEFAULT, 1 if tools_enabled else 0, engine_mode or "native", safe_ui_lang),
                     )
                     conn.commit()
             DB.withRetry(op, "save_session")
