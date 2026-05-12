@@ -257,15 +257,26 @@ def build_models_view(sess, category="text", limit=12):
 
 def build_menu_root(sess):
     """Корневое inline-меню /menu. Доступно всем профилям."""
+    ui_lang = sess.get("ui_lang", "ru")
+    is_en = ui_lang == "en"
+    back_label = "← Back" if is_en else "← Назад"
     kb = [
-        [{"text": "💬 Чат", "callback_data": "menu:chat"},
-         {"text": "🎙 Голос", "callback_data": "menu:voice"}],
-        [{"text": "🛠 Код", "callback_data": "menu:code"},
-         {"text": "🖼 Картинки", "callback_data": "menu:image"}],
-        [{"text": "🎬 Видео", "callback_data": "menu:video"}],
-        [{"text": "⚙️ Настройки", "callback_data": "menu:settings"}],
+        [{"text": ("💬 Chat" if is_en else "💬 Чат"), "callback_data": "menu:chat"},
+         {"text": ("🎙 Voice" if is_en else "🎙 Голос"), "callback_data": "menu:voice"}],
+        [{"text": ("🛠 Code" if is_en else "🛠 Код"), "callback_data": "menu:code"},
+         {"text": ("🖼 Images" if is_en else "🖼 Картинки"), "callback_data": "menu:image"}],
+        [{"text": ("🎬 Video" if is_en else "🎬 Видео"), "callback_data": "menu:video"}],
+        [{"text": ("⚙️ Settings" if is_en else "⚙️ Настройки"), "callback_data": "menu:settings"}],
     ]
     txt = (
+        "🤖 What do you want to do?\n\n"
+        "💬 Chat — send text, I reply.\n"
+        "🎙 Voice — send voice message or text for TTS.\n"
+        "🛠 Code — task in sandbox (Claude Code).\n"
+        "🖼 Images — image generation and analysis.\n"
+        "🎬 Video — synthetic video detection.\n"
+        "⚙️ Settings — model, provider, profile."
+    ) if is_en else (
         "🤖 Что хочешь сделать?\n\n"
         "💬 Чат — пиши текст, отвечу.\n"
         "🎙 Голос — пришли голосовое или текст для озвучки.\n"
@@ -279,37 +290,38 @@ def build_menu_root(sess):
 def build_menu_settings(sess):
     """Сабменю настроек. В Профи появляются дополнительные кнопки."""
     profile = sess.get("profile", "beginner")
+    is_en = sess.get("ui_lang", "ru") == "en"
     model = sess.get("model", "")
     prov = sess.get("provider", PROVIDER_DEFAULT)
     mode = sess.get("engine_mode", "native")
     model_short = model.split("/")[-1] if "/" in model else model
     if len(model_short) > 30:
         model_short = model_short[:27] + "…"
-    profile_label = "Новичок" if profile == "beginner" else "Профи"
+    profile_label = ("Beginner" if profile == "beginner" else "Pro") if is_en else ("Новичок" if profile == "beginner" else "Профи")
     ui_lang = sess.get("ui_lang", "ru")
     lang_label = "RU" if ui_lang == "ru" else "EN"
     kb = [
-        [{"text": f"🤖 Модель: {model_short}", "callback_data": "menu:model"}],
-        [{"text": f"🔌 Провайдер: {prov}", "callback_data": "menu:provider"}],
-        [{"text": f"👤 Профиль: {profile_label}", "callback_data": "menu:profile_toggle"}],
-        [{"text": f"🌐 Язык: {lang_label}", "callback_data": "menu:lang_toggle"}],
+        [{"text": (f"🤖 Model: {model_short}" if is_en else f"🤖 Модель: {model_short}"), "callback_data": "menu:model"}],
+        [{"text": (f"🔌 Provider: {prov}" if is_en else f"🔌 Провайдер: {prov}"), "callback_data": "menu:provider"}],
+        [{"text": (f"👤 Profile: {profile_label}" if is_en else f"👤 Профиль: {profile_label}"), "callback_data": "menu:profile_toggle"}],
+        [{"text": (f"🌐 Language: {lang_label}" if is_en else f"🌐 Язык: {lang_label}"), "callback_data": "menu:lang_toggle"}],
     ]
     if profile == "pro":
         tools_on = sess.get("tools_enabled", True)
         kb += [
             [{"text": f"🛠 Mode: {mode}", "callback_data": "menu:mode"}],
             [{"text": f"🧰 Tools: {'on' if tools_on else 'off'}", "callback_data": "menu:tools"}],
-            [{"text": "🏆 Топ моделей", "callback_data": "menu:top"}],
+            [{"text": ("🏆 Top models" if is_en else "🏆 Топ моделей"), "callback_data": "menu:top"}],
             [{"text": "🐛 Debug", "callback_data": "menu:debug"}],
         ]
     kb += [
-        [{"text": "🔄 Сброс истории", "callback_data": "menu:reset"}],
-        [{"text": "📈 Статус", "callback_data": "menu:status"}],
-        [{"text": "📝 Отзыв", "callback_data": "menu:feedback"}],
-        [{"text": "❓ Помощь", "callback_data": "menu:help"}],
-        [{"text": "← Назад", "callback_data": "menu:back"}],
+        [{"text": ("🔄 Reset history" if is_en else "🔄 Сброс истории"), "callback_data": "menu:reset"}],
+        [{"text": ("📈 Status" if is_en else "📈 Статус"), "callback_data": "menu:status"}],
+        [{"text": ("📝 Feedback" if is_en else "📝 Отзыв"), "callback_data": "menu:feedback"}],
+        [{"text": ("❓ Help" if is_en else "❓ Помощь"), "callback_data": "menu:help"}],
+        [{"text": ("← Back" if is_en else "← Назад"), "callback_data": "menu:back"}],
     ]
-    return "⚙️ Настройки", kb
+    return ("⚙️ Settings" if is_en else "⚙️ Настройки"), kb
 
 def groq_transcribe_audio(audio_bytes, filename="audio.ogg", language="ru", model="whisper-large-v3-turbo"):
     api_key = load_provider_key(STT_PROVIDER)
@@ -1211,6 +1223,8 @@ def handle_callback(cb, token, admin_id):
         chat_id = cb["message"]["chat"]["id"]
         msg_id = cb["message"]["message_id"]
         sess = DB.get_session(uid)
+        is_en = sess.get("ui_lang", "ru") == "en"
+        back_label = "← Back" if is_en else "← Назад"
         if action == "back":
             m_txt, m_kb = build_menu_root(sess)
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": m_txt, "reply_markup": {"inline_keyboard": m_kb}})
@@ -1219,27 +1233,27 @@ def handle_callback(cb, token, admin_id):
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": s_txt, "reply_markup": {"inline_keyboard": s_kb}})
         elif action == "chat":
             DB.save_session(uid, sess["model"], sess["history"], provider=sess["provider"], tools_enabled=sess["tools_enabled"], engine_mode="native")
-            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": "💬 Чат-режим включён.\nПиши обычный текст — я отвечу.", "reply_markup": {"inline_keyboard": [[{"text": "← Назад", "callback_data": "menu:back"}]]}})
+            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": ("💬 Chat mode enabled.\nSend text and I'll reply." if is_en else "💬 Чат-режим включён.\nПиши обычный текст — я отвечу."), "reply_markup": {"inline_keyboard": [[{"text": back_label, "callback_data": "menu:back"}]]}})
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Чат"})
         elif action == "code":
             DB.save_session(uid, sess["model"], sess["history"], provider=sess["provider"], tools_enabled=sess["tools_enabled"], engine_mode="claude")
-            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": "🛠 Код-режим (Claude Code) включён.\nОтправь задачу — выполню в песочнице.", "reply_markup": {"inline_keyboard": [[{"text": "← Назад", "callback_data": "menu:back"}]]}})
+            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": ("🛠 Code mode (Claude Code) enabled.\nSend a task and I'll run it in sandbox." if is_en else "🛠 Код-режим (Claude Code) включён.\nОтправь задачу — выполню в песочнице."), "reply_markup": {"inline_keyboard": [[{"text": back_label, "callback_data": "menu:back"}]]}})
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Код"})
         elif action == "voice":
             # Put user into the pending-STT set so the next voice/audio message
             # gets transcribed automatically, same as typing /stt.
             with pendingSttUsersLock:
                 pendingSttUsers.add(uid)
-            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": "🎙 Голос\nПришли голосовое — расшифрую.\nИли используй /tts <текст> для озвучки.", "reply_markup": {"inline_keyboard": [[{"text": "← Назад", "callback_data": "menu:back"}]]}})
+            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": ("🎙 Voice\nSend voice message — I'll transcribe it.\nOr use /tts <text> for speech." if is_en else "🎙 Голос\nПришли голосовое — расшифрую.\nИли используй /tts <текст> для озвучки."), "reply_markup": {"inline_keyboard": [[{"text": back_label, "callback_data": "menu:back"}]]}})
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Голос"})
         elif action == "image":
-            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": "🖼 Картинки\nИспользуй /video для анализа видео или меню /models → переключи на Image для генерации (если у провайдера есть).", "reply_markup": {"inline_keyboard": [[{"text": "← Назад", "callback_data": "menu:back"}]]}})
+            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": ("🖼 Images\nUse /video for video analysis or /models → switch to Image for generation (if provider supports it)." if is_en else "🖼 Картинки\nИспользуй /video для анализа видео или меню /models → переключи на Image для генерации (если у провайдера есть)."), "reply_markup": {"inline_keyboard": [[{"text": back_label, "callback_data": "menu:back"}]]}})
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Картинки"})
         elif action == "video":
             DB.save_session(uid, VIDEO_DETECTOR_MODEL, sess["history"], provider=VIDEO_DETECTOR_PROVIDER, tools_enabled=sess["tools_enabled"], engine_mode=sess.get("engine_mode", "native"))
             with pendingVideoUsersLock:
                 pendingVideoUsers.add(uid)
-            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": "🎬 Видео-режим включён.\nМодель: nvidia/ai-synthetic-video-detector\nПришли видеофайл (можно с подписью-текстом).", "reply_markup": {"inline_keyboard": [[{"text": "← Назад", "callback_data": "menu:back"}]]}})
+            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": ("🎬 Video mode enabled.\nModel: nvidia/ai-synthetic-video-detector\nSend video file (you can add text in caption)." if is_en else "🎬 Видео-режим включён.\nМодель: nvidia/ai-synthetic-video-detector\nПришли видеофайл (можно с подписью-текстом)."), "reply_markup": {"inline_keyboard": [[{"text": back_label, "callback_data": "menu:back"}]]}})
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Видео"})
         elif action == "lang_toggle":
             new_lang = "en" if sess.get("ui_lang", "ru") == "ru" else "ru"
@@ -1270,7 +1284,7 @@ def handle_callback(cb, token, admin_id):
                 runtimeStatus.pop(uid, None)
             u_dir = os.path.join(SESSIONS_ROOT, str(uid))
             if os.path.exists(u_dir): shutil.rmtree(u_dir); os.makedirs(u_dir)
-            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": "✅ История сброшена.", "reply_markup": {"inline_keyboard": [[{"text": "← Назад", "callback_data": "menu:back"}]]}})
+            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": ("✅ History reset." if is_en else "✅ История сброшена."), "reply_markup": {"inline_keyboard": [[{"text": back_label, "callback_data": "menu:back"}]]}})
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Сброшено"})
         elif action == "status":
             handle_command(uid, "", "/status", token, admin_id)
