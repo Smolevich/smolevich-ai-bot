@@ -1,0 +1,17 @@
+FROM python:3.12-slim
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt
+RUN git clone --depth 1 https://github.com/NVIDIA-Maxine/nim-clients.git
+
+WORKDIR /opt/nim-clients/synthetic-video-detector
+RUN pip install --no-cache-dir -r requirements.txt
+
+RUN chmod +x protos/linux/compile_protos.sh && \
+    cd protos/linux && ./compile_protos.sh
+
+WORKDIR /opt/nim-clients/synthetic-video-detector/scripts
+ENTRYPOINT ["python", "synthetic-video-detector.py", "--preview-mode", "--target", "grpc.nvcf.nvidia.com:443"]

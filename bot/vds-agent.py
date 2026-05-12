@@ -492,39 +492,49 @@ def tts_with_fallback(selected_provider, text, model):
             errors.append(f"{provider}: {e}")
     raise RuntimeError("; ".join(errors)[:400])
 
+NVIDIA_MAXINE_FUNCTIONS = {
+    "nvidia/ai-synthetic-video-detector": "847b6e53-0133-452d-ab85-d7acf3ace723",
+}
+NVIDIA_MAXINE_IMAGE = "nvidia-maxine-svd"
+NVIDIA_MAXINE_TARGET = "grpc.nvcf.nvidia.com:443"
+
+
 def analyze_video_detection(api_url, api_key, model, video_bytes, filename="video.mp4", use_proxy=False):
-    mime, _ = mimetypes.guess_type(filename or "")
-    if not mime:
-        mime = "video/mp4"
-    b64 = base64.b64encode(video_bytes or b"").decode("ascii")
-    data_url = f"data:{mime};base64,{b64}"
-    payload = {
-        "model": model,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": "Analyze this video and say whether it is AI-generated/synthetic. Return short conclusion and confidence."},
-                    {"type": "input_video", "video_url": data_url},
-                ],
-            }
-        ],
-        "max_tokens": 512,
-    }
-    req = urllib.request.Request(
-        api_url,
-        data=json.dumps(payload).encode(),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": "curl/8.7.1",
-        },
-    )
-    opener = make_opener(use_proxy)
-    with opener.open(req, timeout=180) as resp:
-        data = json.loads(resp.read().decode())
-    return (data.get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
+    function_id = NVIDIA_MAXINE_FUNCTIONS.get(model)
+    if not function_id:
+        raise RuntimeError(f"No NVCF function mapping for model {model}")
+    import subprocess, tempfile, re
+    with tempfile.TemporaryDirectory(prefix="svd-") as tmp:
+        os.chmod(tmp, 0o777)
+        in_path = os.path.join(tmp, "in.mp4")
+        out_path = os.path.join(tmp, "out.csv")
+        with open(in_path, "wb") as f:
+            f.write(video_bytes or b"")
+        cmd = [
+            "podman", "run", "--rm",
+            "-v", f"{tmp}:/data:Z",
+            NVIDIA_MAXINE_IMAGE,
+            "--function-id", function_id,
+            "--api-key", api_key,
+            "--video-input", "/data/in.mp4",
+            "--save-csv", "/data/out.csv",
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        stdout = proc.stdout or ""
+        if proc.returncode != 0:
+            tail = (proc.stderr or stdout).strip().splitlines()[-3:]
+            raise RuntimeError("podman: " + " | ".join(tail))
+        verdict = re.search(r"VERDICT:\s*(\w+)\s*\(confidence:\s*([\d.]+)%\)", stdout)
+        prob = re.search(r"Final probability:\s*([\d.]+)", stdout)
+        frames = re.search(r"Total frames processed:\s*(\d+)", stdout)
+        if verdict:
+            label = verdict.group(1).capitalize()
+            conf = verdict.group(2)
+            lines = [f"*{label}* (confidence {conf}%)"]
+            if prob: lines.append(f"P(synthetic) = {prob.group(1)}")
+            if frames: lines.append(f"frames analyzed: {frames.group(1)}")
+            return "\n".join(lines)
+        return stdout.strip()[-800:] or "no output"
 
 
 BEGINNER_COMMANDS = [
