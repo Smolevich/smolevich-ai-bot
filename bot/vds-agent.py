@@ -196,6 +196,21 @@ def capabilities_for_model(provider, model_id):
             out.append(c)
     return out
 
+
+def ensure_text_model_for_session(sess):
+    """Return (provider, model, switched) ensuring chat/code use text-capable model."""
+    provider = sess.get("provider", PROVIDER_DEFAULT)
+    model = sess.get("model", "")
+    info = DB.get_model_info(provider, model) if model else None
+    category = (info or {}).get("category", "")
+    if category in ("", "text", "code"):
+        return provider, model, False
+    chosen = DB.pick_default_text_model(provider)
+    if not chosen:
+        provider = PROVIDER_DEFAULT
+        chosen = DB.pick_default_text_model(provider) or PROVIDERS[provider]["default_model"]
+    return provider, chosen, True
+
 def build_models_view(sess, category="text", limit=12):
     prov = sess["provider"]
     category = (category or "text").lower()
@@ -1232,13 +1247,15 @@ def handle_callback(cb, token, admin_id):
             s_txt, s_kb = build_menu_settings(sess)
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": s_txt, "reply_markup": {"inline_keyboard": s_kb}})
         elif action == "chat":
-            DB.save_session(uid, sess["model"], sess["history"], provider=sess["provider"], tools_enabled=sess["tools_enabled"], engine_mode="native")
+            use_provider, use_model, switched = ensure_text_model_for_session(sess)
+            DB.save_session(uid, use_model, sess["history"], provider=use_provider, tools_enabled=sess["tools_enabled"], engine_mode="native")
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": ("💬 Chat mode enabled.\nSend text and I'll reply." if is_en else "💬 Чат-режим включён.\nПиши обычный текст — я отвечу."), "reply_markup": {"inline_keyboard": [[{"text": back_label, "callback_data": "menu:back"}]]}})
-            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Чат"})
+            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": ("Switched to text model" if switched and is_en else ("Переключил на текстовую модель" if switched else "Чат"))})
         elif action == "code":
-            DB.save_session(uid, sess["model"], sess["history"], provider=sess["provider"], tools_enabled=sess["tools_enabled"], engine_mode="claude")
+            use_provider, use_model, switched = ensure_text_model_for_session(sess)
+            DB.save_session(uid, use_model, sess["history"], provider=use_provider, tools_enabled=sess["tools_enabled"], engine_mode="claude")
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": ("🛠 Code mode (Claude Code) enabled.\nSend a task and I'll run it in sandbox." if is_en else "🛠 Код-режим (Claude Code) включён.\nОтправь задачу — выполню в песочнице."), "reply_markup": {"inline_keyboard": [[{"text": back_label, "callback_data": "menu:back"}]]}})
-            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Код"})
+            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": ("Switched to text model" if switched and is_en else ("Переключил на текстовую модель" if switched else "Код"))})
         elif action == "voice":
             # Put user into the pending-STT set so the next voice/audio message
             # gets transcribed automatically, same as typing /stt.
@@ -1900,6 +1917,23 @@ def process_update(upd, token, admin_id):
             inflightUsers.add(uid)
 
         sess = DB.get_session(uid); hist = sess["history"]; model = sess["model"]; provider = sess["provider"]
+        fixed_provider, fixed_model, switched_to_text = ensure_text_model_for_session(sess)
+        if switched_to_text:
+            provider = fixed_provider
+            model = fixed_model
+            DB.save_session(
+                uid,
+                model,
+                hist,
+                provider=provider,
+                tools_enabled=sess["tools_enabled"],
+                engine_mode=sess.get("engine_mode", "native"),
+                ui_lang=sess.get("ui_lang", "ru"),
+            )
+            if sess.get("ui_lang", "ru") == "en":
+                tg_send_text(token, uid, "ℹ️ Switched from media model to chat model for text request.")
+            else:
+                tg_send_text(token, uid, "ℹ️ Для текстового запроса переключил модель с видео на чатовую.")
         prov = PROVIDERS.get(provider, PROVIDERS[PROVIDER_DEFAULT])
         api_key = load_provider_key(provider) or load_provider_key(PROVIDER_DEFAULT)
         use_proxy = prov.get("proxy", False)
