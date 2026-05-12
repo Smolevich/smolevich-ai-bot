@@ -61,6 +61,8 @@ runtimeStatus = {}
 runtimeStatusLock = threading.Lock()
 pendingSttUsers = set()
 pendingSttUsersLock = threading.Lock()
+pendingVideoUsers = set()
+pendingVideoUsersLock = threading.Lock()
 pendingTranslateUsers = set()
 pendingTranslateUsersLock = threading.Lock()
 DEBUG_USERS = set()
@@ -74,6 +76,8 @@ STT_DEFAULT_MODEL_BY_PROVIDER = {
 TTS_DEFAULT_MODEL_BY_PROVIDER = {
     "groq": "playai-tts",
 }
+VIDEO_DETECTOR_PROVIDER = "nvidia"
+VIDEO_DETECTOR_MODEL = "nvidia/ai-synthetic-video-detector"
 
 # --- Tools ---
 def tool_run_in_container(command, uid, allow_network=False):
@@ -257,6 +261,7 @@ def build_menu_root(sess):
          {"text": "🎙 Голос", "callback_data": "menu:voice"}],
         [{"text": "🛠 Код", "callback_data": "menu:code"},
          {"text": "🖼 Картинки", "callback_data": "menu:image"}],
+        [{"text": "🎬 Видео", "callback_data": "menu:video"}],
         [{"text": "⚙️ Настройки", "callback_data": "menu:settings"}],
     ]
     txt = (
@@ -265,6 +270,7 @@ def build_menu_root(sess):
         "🎙 Голос — пришли голосовое или текст для озвучки.\n"
         "🛠 Код — задача в песочнице (Claude Code).\n"
         "🖼 Картинки — генерация и анализ изображений.\n"
+        "🎬 Видео — проверка видео на синтетику.\n"
         "⚙️ Настройки — модель, провайдер, профиль."
     )
     return txt, kb
@@ -554,6 +560,7 @@ PRO_COMMANDS = [
     {"command": "model", "description": "Set model manually"},
     {"command": "stt", "description": "Speech-to-text (send voice/audio next)"},
     {"command": "tts", "description": "Text-to-speech: /tts your text"},
+    {"command": "video", "description": "Video detect: send video next (/video <note>)"},
     {"command": "reset", "description": "Reset chat history"},
     {"command": "feedback", "description": "Send feedback to admin"},
     {"command": "debug", "description": "Toggle debug footer"},
@@ -1181,6 +1188,12 @@ def handle_callback(cb, token, admin_id):
         elif action == "image":
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": "🖼 Картинки\nИспользуй /video для анализа видео или меню /models → переключи на Image для генерации (если у провайдера есть).", "reply_markup": {"inline_keyboard": [[{"text": "← Назад", "callback_data": "menu:back"}]]}})
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Картинки"})
+        elif action == "video":
+            DB.save_session(uid, VIDEO_DETECTOR_MODEL, sess["history"], provider=VIDEO_DETECTOR_PROVIDER, tools_enabled=sess["tools_enabled"], engine_mode=sess.get("engine_mode", "native"))
+            with pendingVideoUsersLock:
+                pendingVideoUsers.add(uid)
+            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": "🎬 Видео-режим включён.\nМодель: nvidia/ai-synthetic-video-detector\nПришли видеофайл (можно с подписью-текстом).", "reply_markup": {"inline_keyboard": [[{"text": "← Назад", "callback_data": "menu:back"}]]}})
+            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Видео"})
         elif action == "profile_toggle":
             new_profile = "pro" if sess.get("profile", "beginner") == "beginner" else "beginner"
             DB.save_profile(uid, new_profile)
@@ -1475,6 +1488,19 @@ def handle_command(uid, username, text, token, admin_id):
                 error=str(e),
             )
             tg_send_text(token, uid, f"❌ TTS error: {str(e)[:300]}")
+    elif text.startswith("/video"):
+        sess = DB.get_session(uid)
+        if sess.get("profile", "beginner") != "pro":
+            tg_send_text(token, uid, "Команда /video доступна в профиле Профи.\nДля новичка: /menu → 🎬 Видео.")
+            return True
+        note = text.split(maxsplit=1)[1].strip() if len(text.split(maxsplit=1)) > 1 else ""
+        DB.save_session(uid, VIDEO_DETECTOR_MODEL, sess["history"], provider=VIDEO_DETECTOR_PROVIDER, tools_enabled=sess["tools_enabled"], engine_mode=sess.get("engine_mode", "native"))
+        with pendingVideoUsersLock:
+            pendingVideoUsers.add(uid)
+        msg = "🎬 Видео-режим включён.\nМодель: nvidia/ai-synthetic-video-detector\nПришли видеофайл (MP4/WebM)."
+        if note:
+            msg += f"\nПодпись сохранена: {note}"
+        tg_send_text(token, uid, msg)
     elif text == "/users" and uid == admin_id:
         stats = DB.get_all_users_stats(); txt = "👥 *Users:*\n"
         for s in stats:
@@ -1538,6 +1564,8 @@ def process_update(upd, token, admin_id):
         # 2) selected model is an audio/STT model (auto mode).
         with pendingSttUsersLock:
             stt_pending = uid in pendingSttUsers
+        with pendingVideoUsersLock:
+            video_pending = uid in pendingVideoUsers
         sess_for_media = DB.get_session(uid)
         model_for_media = (sess_for_media.get("model") or "").lower()
         model_caps = capabilities_for_model(sess_for_media.get("provider", PROVIDER_DEFAULT), sess_for_media.get("model", ""))
@@ -1552,7 +1580,7 @@ def process_update(upd, token, admin_id):
             ))
         )
 
-        if has_video_detector and has_video_payload:
+        if (has_video_detector and has_video_payload) or (video_pending and has_video_payload):
             try:
                 provider = sess_for_media.get("provider", PROVIDER_DEFAULT)
                 selected_model = sess_for_media.get("model", "")
@@ -1623,8 +1651,10 @@ def process_update(upd, token, admin_id):
                     ok=bool(analysis),
                     error=None if analysis else "empty_analysis",
                 )
+                caption_text = str((msg.get("caption") or "")).strip()
+                prefix = f"📝 Контекст: {caption_text}\n\n" if caption_text else ""
                 if analysis:
-                    tg_send_long_text(token, uid, f"🕵️ Video analysis:\n{analysis}")
+                    tg_send_long_text(token, uid, f"{prefix}🕵️ Video analysis:\n{analysis}")
                 else:
                     tg_send_text(token, uid, "⚠️ Empty video analysis result.")
             except Exception as e:
@@ -1640,6 +1670,9 @@ def process_update(upd, token, admin_id):
                     error=str(e),
                 )
                 tg_send_text(token, uid, f"❌ Video analysis error: {str(e)[:300]}")
+            finally:
+                with pendingVideoUsersLock:
+                    pendingVideoUsers.discard(uid)
             return
 
         if (stt_pending or auto_stt_model) and ("voice" in msg or "audio" in msg or "document" in msg):
