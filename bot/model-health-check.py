@@ -260,6 +260,8 @@ def check_provider(conn, prov_name, openrouter_delay_sec=OPENROUTER_DELAY_SEC):
         # Phase 2: batch commit all results in a single short transaction.
         now = int(time.time())
         for model_id, latency, available, _, category, error, rate_limited in results:
+            if category not in ("text", "code"):
+                continue
             supports_tools = tools_map.get(model_id, prov.get("supports_tools", False))
             effective_available = _carry_or_set_availability(conn, prov_name, model_id, available, rate_limited)
             conn.execute(
@@ -306,15 +308,16 @@ def check_provider(conn, prov_name, openrouter_delay_sec=OPENROUTER_DELAY_SEC):
     # Phase 2: batch commit all results in a single short transaction.
     now = int(time.time())
     for model_id, latency, available, supports_tools, category, error, rate_limited in results:
+        if category not in ("text", "code"):
+            continue
         effective_available = _carry_or_set_availability(conn, prov_name, model_id, available, rate_limited)
         conn.execute(
             "INSERT OR REPLACE INTO model_health (provider, model_id, latency_ms, available, supports_tools, category, capabilities, last_check) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (prov_name, model_id, latency, effective_available,
              1 if supports_tools else 0, category, capabilities_for_category(category), now))
-        if category in ("text", "code"):
-            conn.execute(
-                "INSERT INTO model_health_log (ts, provider, model_id, latency_ms, available, error) VALUES (?, ?, ?, ?, ?, ?)",
-                (now, prov_name, model_id, latency, 1 if available else 0, error))
+        conn.execute(
+            "INSERT INTO model_health_log (ts, provider, model_id, latency_ms, available, error) VALUES (?, ?, ?, ?, ?, ?)",
+            (now, prov_name, model_id, latency, 1 if available else 0, error))
     conn.commit()
     log.info(f"{prov_name}: {ok} ok, {fail} failed, {throttled} rate-limited (kept prior state)")
 
