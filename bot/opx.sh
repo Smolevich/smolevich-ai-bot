@@ -7,9 +7,13 @@ TASK=""
 MODEL=""
 WORKDIR="/var/lib/vds-agent/sessions"
 PROXY_FILE="/etc/socks-monitor/.proxy_url"
-PROXY_URL="${BOT_PROXY_URL:-}"
-if [[ -z "$PROXY_URL" && -f "$PROXY_FILE" ]]; then
-  PROXY_URL="$(cat "$PROXY_FILE")"
+if [[ -n "${BOT_PROXY_DISABLED:-}" ]]; then
+  PROXY_URL=""
+else
+  PROXY_URL="${BOT_PROXY_URL:-}"
+  if [[ -z "$PROXY_URL" && -f "$PROXY_FILE" ]]; then
+    PROXY_URL="$(cat "$PROXY_FILE")"
+  fi
 fi
 OPENROUTER_KEY_FILE="/etc/socks-monitor/.openrouter_key"
 

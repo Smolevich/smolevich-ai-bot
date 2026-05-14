@@ -17,6 +17,8 @@ PROXY_FILE = "/etc/socks-monitor/.proxy_url"
 
 
 def _resolve_proxy():
+    if os.environ.get("BOT_PROXY_DISABLED", "").strip():
+        return ""
     val = os.environ.get("BOT_PROXY_URL", "")
     if val:
         return val

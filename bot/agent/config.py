@@ -11,7 +11,7 @@ SESSIONS_ROOT = os.environ.get("BOT_SESSIONS_ROOT", "/var/lib/vds-agent/sessions
 TUNNEL_URL = os.environ.get("BOT_TUNNEL_URL", "https://ai.smolevich.com")
 MAX_CONTEXT_TOKENS = int(os.environ.get("BOT_MAX_CONTEXT_TOKENS", "64000"))
 REQUIRED_CHANNEL = os.environ.get("BOT_REQUIRED_CHANNEL", "@naturalists_notes_st")
-PROXY_URL = os.environ.get("BOT_PROXY_URL", "")
+PROXY_URL = "" if os.environ.get("BOT_PROXY_DISABLED", "").strip() else os.environ.get("BOT_PROXY_URL", "")
 
 PROVIDERS: dict[str, dict[str, Any]] = {
     "openrouter": {
