@@ -6,7 +6,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REMOTE="vscale"
+REMOTE="hetzner-bot"
 REMOTE_PATH="/usr/local/bin/vds-agent"
 
 echo "Deploying bot/vds-agent.py -> ${REMOTE}:${REMOTE_PATH}"
