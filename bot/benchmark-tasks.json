@@ -4,7 +4,7 @@
     {
       "id": "gsm8k_native",
       "kind": "gsm8k_numeric",
-      "samples_per_run": 1,
+      "samples_per_run": 5,
       "dataset": "gsm8k.json",
       "license": "MIT",
       "source_url": "https://huggingface.co/datasets/openai/gsm8k",
