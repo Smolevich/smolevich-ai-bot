@@ -26,6 +26,7 @@ import urllib.error
 import urllib.request
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -83,6 +84,13 @@ DEFAULT_BENCHMARK_ROOT = os.environ.get(
 
 def now_ts() -> int:
     return int(time.time())
+
+
+def iso_local_time(ts: Any) -> str | None:
+    try:
+        return datetime.fromtimestamp(int(ts)).astimezone().isoformat(timespec="seconds")
+    except (TypeError, ValueError, OSError, OverflowError):
+        return None
 
 
 def kill_switch() -> bool:
@@ -708,7 +716,9 @@ def infer_strengths(model_id: str, native_score: float, claude_score: float, lat
         strengths.append("Code")
     if any(k in mid for k in ("70b", "120b", "405b", "large", "nemotron", "reason")):
         strengths.append("Reasoning")
-    if len(strengths) < 3:
+    if "Russian/English" not in strengths:
+        if len(strengths) >= 5:
+            strengths = strengths[:4]
         strengths.append("Russian/English")
     return strengths[:5]
 
@@ -729,6 +739,7 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
     cutoff = now_ts() - max(1, args.lookback_hours) * 3600
     tasks = load_tasks(args.tasks_path)
     with connect(args.db) as conn:
+        conn.row_factory = sqlite3.Row
         try:
             agg_rows = conn.execute(
                 """
@@ -752,18 +763,33 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
         try:
             recent_rows = conn.execute(
                 """
-                SELECT provider, model_id, mode, task_id, sample_id, latency_ms, ok, score, ts,
-                       json_extract(details_json, '$.usage.prompt_tokens'),
-                       json_extract(details_json, '$.usage.completion_tokens'),
-                       json_extract(details_json, '$.usage.total_tokens')
+                SELECT provider, model_id, mode, task_id, sample_id, latency_ms, ok, score, ts, batch_id,
+                       json_extract(details_json, '$.usage.prompt_tokens') AS prompt_tokens,
+                       json_extract(details_json, '$.usage.completion_tokens') AS completion_tokens,
+                       json_extract(details_json, '$.usage.total_tokens') AS total_tokens
                 FROM model_benchmark_results
                 WHERE ts >= ?
                 ORDER BY ts DESC
                 """,
                 (cutoff,),
             ).fetchall()
-        except sqlite3.OperationalError:
-            recent_rows = []
+        except sqlite3.OperationalError as e:
+            if "no such column" in str(e).lower() and "batch_id" in str(e).lower():
+                recent_rows = conn.execute(
+                    """
+                    SELECT provider, model_id, mode, task_id, sample_id, latency_ms, ok, score, ts,
+                           NULL AS batch_id,
+                           json_extract(details_json, '$.usage.prompt_tokens') AS prompt_tokens,
+                           json_extract(details_json, '$.usage.completion_tokens') AS completion_tokens,
+                           json_extract(details_json, '$.usage.total_tokens') AS total_tokens
+                    FROM model_benchmark_results
+                    WHERE ts >= ?
+                    ORDER BY ts DESC
+                    """,
+                    (cutoff,),
+                ).fetchall()
+            else:
+                recent_rows = []
         try:
             health_rows = conn.execute(
                 """
@@ -820,24 +846,35 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
     # Task results per (provider, model) — последние 50 строк
     results_by_pm: dict[tuple[str, str], list[dict[str, Any]]] = {}
     tokens_by_pm: dict[tuple[str, str], list[int]] = {}
+    batch_ts: dict[str, int] = {}
     for row in recent_rows:
-        key = (row[0], row[1])
+        batch_id = str(row["batch_id"] or "")
+        ts = int(row["ts"] or 0)
+        if batch_id and ts:
+            batch_ts[batch_id] = min(ts, batch_ts.get(batch_id, ts))
+    for row in recent_rows:
+        key = (row["provider"], row["model_id"])
         bucket = results_by_pm.setdefault(key, [])
-        prompt_tokens = int(row[9]) if row[9] is not None else None
-        completion_tokens = int(row[10]) if row[10] is not None else None
-        total_tokens = int(row[11]) if row[11] is not None else None
+        prompt_tokens = int(row["prompt_tokens"]) if row["prompt_tokens"] is not None else None
+        completion_tokens = int(row["completion_tokens"]) if row["completion_tokens"] is not None else None
+        total_tokens = int(row["total_tokens"]) if row["total_tokens"] is not None else None
         if total_tokens is not None:
             tokens_by_pm.setdefault(key, []).append(total_tokens)
         if len(bucket) >= 50:
             continue
+        batch_id = str(row["batch_id"] or "")
+        run_ts = batch_ts.get(batch_id) if batch_id else int(row["ts"] or 0)
+        run_id = iso_local_time(run_ts)
         entry: dict[str, Any] = {
-            "task_id": row[3],
-            "mode": row[2],
-            "sample_id": row[4] or "",
-            "ok": bool(row[6]),
-            "score": float(row[7] or 0.0),
-            "latency_ms": int(row[5] or 0),
+            "task_id": row["task_id"],
+            "mode": row["mode"],
+            "sample_id": row["sample_id"] or "",
+            "ok": bool(row["ok"]),
+            "score": float(row["score"] or 0.0),
+            "latency_ms": int(row["latency_ms"] or 0),
         }
+        if run_id:
+            entry["run_id"] = run_id
         if prompt_tokens is not None:
             entry["prompt_tokens"] = prompt_tokens
         if completion_tokens is not None:
