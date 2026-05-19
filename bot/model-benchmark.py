@@ -44,6 +44,7 @@ DEFAULT_LOOKBACK_HOURS = 168
 STABLE_MIN_SUCCESS_RATE = 0.9
 STABLE_MIN_CHECKS = 6
 STABLE_MAX_LATENCY_MS = 8000
+STABLE_MAX_BENCH_TRANSIENT_ERRORS = 2
 
 DEFAULT_NATIVE_WORKERS = 4
 DEFAULT_MAX_JOBS = 200
@@ -145,30 +146,45 @@ def stable_models(conn: sqlite3.Connection, provider: str, limit: int, lookback_
                 FROM model_health_log
                 WHERE ts >= ?
                 GROUP BY provider, model_id
+            ),
+            bench_transient AS (
+                SELECT provider, model_id,
+                       SUM(CASE
+                           WHEN error LIKE 'HTTP 429:%' OR error LIKE 'HTTP 5%' THEN 1
+                           ELSE 0
+                       END) AS transient_errors
+                FROM model_benchmark_results
+                WHERE ts >= ?
+                GROUP BY provider, model_id
             )
             SELECT mh.provider, mh.model_id, mh.latency_ms,
                    COALESCE(recent.checks, 0),
                    COALESCE(recent.ok_checks, 0),
                    COALESCE(CAST(recent.ok_checks AS REAL) / NULLIF(recent.checks, 0), 0.0) AS success_rate,
                    COALESCE(recent.avg_latency_ms, NULLIF(mh.latency_ms, 0), 999999) AS stable_latency_ms,
-                   COALESCE(recent.last_seen, mh.last_check, 0)
+                   COALESCE(recent.last_seen, mh.last_check, 0),
+                   COALESCE(bench_transient.transient_errors, 0) AS transient_errors
             FROM model_health mh
             LEFT JOIN recent ON recent.provider = mh.provider AND recent.model_id = mh.model_id
+            LEFT JOIN bench_transient ON bench_transient.provider = mh.provider AND bench_transient.model_id = mh.model_id
             WHERE mh.provider = ?
               AND mh.category = 'text'
               AND mh.available = 1
               AND COALESCE(recent.checks, 0) >= ?
               AND COALESCE(CAST(recent.ok_checks AS REAL) / NULLIF(recent.checks, 0), 0.0) >= ?
               AND COALESCE(recent.avg_latency_ms, NULLIF(mh.latency_ms, 0), 999999) <= ?
-            ORDER BY success_rate DESC, stable_latency_ms ASC, checks DESC, mh.model_id ASC
+              AND COALESCE(bench_transient.transient_errors, 0) <= ?
+            ORDER BY success_rate DESC, transient_errors ASC, stable_latency_ms ASC, checks DESC, mh.model_id ASC
             LIMIT ?
             """,
             (
+                cutoff,
                 cutoff,
                 provider,
                 STABLE_MIN_CHECKS,
                 STABLE_MIN_SUCCESS_RATE,
                 STABLE_MAX_LATENCY_MS,
+                STABLE_MAX_BENCH_TRANSIENT_ERRORS,
                 max(1, limit),
             ),
         ).fetchall()
@@ -186,6 +202,7 @@ def stable_models(conn: sqlite3.Connection, provider: str, limit: int, lookback_
             "success_rate": float(row[5] or 0.0),
             "stable_latency_ms": int(row[6] or 0),
             "last_seen": int(row[7] or 0),
+            "transient_errors": int(row[8] or 0),
         }
         for row in rows
     ]

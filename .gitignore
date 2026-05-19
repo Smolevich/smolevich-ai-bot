@@ -2,5 +2,8 @@ __pycache__/
 *.pyc
 .env
 *.key
+*.db
+*.db-shm
+*.db-wal
 
 .claude/refactor-plan.md
