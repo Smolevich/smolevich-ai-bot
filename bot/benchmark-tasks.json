@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "native": [
+    {
+      "id": "gsm8k_native",
+      "kind": "gsm8k_numeric",
+      "samples_per_run": 1,
+      "dataset": "gsm8k.json",
+      "license": "MIT",
+      "source_url": "https://huggingface.co/datasets/openai/gsm8k",
+      "max_tokens": 256,
+      "prompt_suffix": "Реши задачу пошагово, а в конце выведи ровно одну строку: ANSWER: <число>"
+    }
+  ],
+  "claude": [
+    {
+      "id": "gsm8k_tooluse",
+      "kind": "gsm8k_tooluse",
+      "samples_per_run": 1,
+      "dataset": "gsm8k.json",
+      "license": "MIT",
+      "source_url": "https://huggingface.co/datasets/openai/gsm8k",
+      "max_tokens": 1024,
+      "max_tool_calls": 3,
+      "workspace_files": {
+        "scratch": "scratch.md",
+        "answer": "answer.txt"
+      },
+      "prompt_suffix": "Запиши ход рассуждения в файл scratch.md, итоговый ответ (только число) положи в файл answer.txt. После этого ответь словом DONE. Используй не более 3 вызовов инструментов."
+    }
+  ]
+}

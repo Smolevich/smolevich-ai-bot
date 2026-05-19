@@ -8,6 +8,7 @@ Restart=always
 User=root
 Environment=PYTHONUNBUFFERED=1
 EnvironmentFile=-/etc/socks-monitor/vds-agent.env
+EnvironmentFile=-/opt/smolevich-ai-bot/.env
 
 [Install]
 WantedBy=multi-user.target

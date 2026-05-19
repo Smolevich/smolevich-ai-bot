@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'bot/**'
+      - '.github/workflows/deploy.yml'
 
   workflow_dispatch:
 
@@ -22,6 +23,7 @@ jobs:
         run: |
           python3 -m py_compile bot/vds-agent.py bot/migrate.py \
             bot/model-health-check.py bot/model-audio-check.py bot/model-media-check.py \
+            bot/model-benchmark.py bot/scripts/refresh-benchmark-datasets.py \
             bot/agent/*.py
 
       - name: Stamp version
@@ -31,6 +33,13 @@ jobs:
           sed -i "s|^__VERSION__ = \"dev\"|__VERSION__ = \"$DATE-$SHA\"|" bot/vds-agent.py
           grep -E '^__VERSION__' bot/vds-agent.py
 
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:gha-runner
+
       - name: Copy files to server
         uses: appleboy/scp-action@v1.0.0
         with:
@@ -39,7 +48,7 @@ jobs:
           username: ${{ secrets.VDS_USER }}
           key: ${{ secrets.VDS_SSH_KEY }}
           passphrase: ${{ secrets.VDS_SSH_PASSPHRASE }}
-          source: bot/vds-agent.py,bot/migrate.py,bot/model-health-check.py,bot/model-audio-check.py,bot/model-media-check.py,bot/vds-agent.service,bot/migrations,bot/agent,bot/Containerfile.acpx-claude,bot/cron.d
+          source: bot/vds-agent.py,bot/migrate.py,bot/model-health-check.py,bot/model-audio-check.py,bot/model-media-check.py,bot/model-benchmark.py,bot/benchmark-tasks.json,bot/benchmark-tasks.md,bot/benchmark-datasets,bot/scripts,bot/vds-agent.service,bot/migrations,bot/agent,bot/Containerfile.acpx-claude,bot/cron.d
           target: /tmp/deploy-bot
           strip_components: 1
 
@@ -49,33 +58,40 @@ jobs:
           BOT_PROXY_URL: ${{ secrets.BOT_PROXY_URL }}
           BOT_PROXY_DISABLED: ${{ secrets.BOT_PROXY_DISABLED }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          MODEL_LEADERBOARD_TOKEN: ${{ secrets.MODEL_LEADERBOARD_TOKEN }}
+          BOT_BENCHMARK_DISABLED: ${{ secrets.BOT_BENCHMARK_DISABLED }}
         with:
           host: ${{ secrets.VDS_HOST }}
           port: ${{ secrets.VDS_PORT }}
           username: ${{ secrets.VDS_USER }}
           key: ${{ secrets.VDS_SSH_KEY }}
           passphrase: ${{ secrets.VDS_SSH_PASSPHRASE }}
-          envs: BOT_PROXY_URL,BOT_PROXY_DISABLED,HF_TOKEN
+          envs: BOT_PROXY_URL,BOT_PROXY_DISABLED,HF_TOKEN,MODEL_LEADERBOARD_TOKEN,BOT_BENCHMARK_DISABLED
           script: |
             set -e
-            sudo install -m 0755 /tmp/deploy-bot/vds-agent.py          /usr/local/bin/vds-agent
-            sudo install -m 0755 /tmp/deploy-bot/migrate.py            /usr/local/bin/migrate_bot_db
-            sudo install -m 0755 /tmp/deploy-bot/model-health-check.py /usr/local/bin/model-health-check
-            sudo install -m 0755 /tmp/deploy-bot/model-audio-check.py  /usr/local/bin/model-audio-check
-            sudo install -m 0755 /tmp/deploy-bot/model-media-check.py  /usr/local/bin/model-media-check
-            sudo install -m 0644 /tmp/deploy-bot/vds-agent.service     /etc/systemd/system/vds-agent.service
+            APP_DIR=/opt/smolevich-ai-bot
+            sudo mkdir -p "$APP_DIR"
+
+            sudo install -m 0755 /tmp/deploy-bot/vds-agent.py             /usr/local/bin/vds-agent
+            sudo install -m 0755 /tmp/deploy-bot/migrate.py               /usr/local/bin/migrate_bot_db
+            sudo install -m 0755 /tmp/deploy-bot/model-health-check.py    /usr/local/bin/model-health-check
+            sudo install -m 0755 /tmp/deploy-bot/model-audio-check.py     /usr/local/bin/model-audio-check
+            sudo install -m 0755 /tmp/deploy-bot/model-media-check.py     /usr/local/bin/model-media-check
+            sudo install -m 0755 /tmp/deploy-bot/model-benchmark.py       /usr/local/bin/model-benchmark
+            sudo install -m 0755 /tmp/deploy-bot/scripts/refresh-benchmark-datasets.py /usr/local/bin/refresh-benchmark-datasets
+            sudo install -m 0644 /tmp/deploy-bot/vds-agent.service        /etc/systemd/system/vds-agent.service
             sudo install -m 0644 /tmp/deploy-bot/Containerfile.acpx-claude /usr/local/bin/Containerfile.acpx-claude
+            sudo install -m 0644 /tmp/deploy-bot/benchmark-tasks.json     /etc/socks-monitor/benchmark-tasks.json
+            sudo install -m 0644 /tmp/deploy-bot/benchmark-tasks.md       /etc/socks-monitor/benchmark-tasks.md
+            sudo mkdir -p /etc/socks-monitor/benchmark-datasets
+            sudo install -m 0644 /tmp/deploy-bot/benchmark-datasets/*.json /etc/socks-monitor/benchmark-datasets/ 2>/dev/null || true
             sudo mkdir -p /usr/local/bin/migrations
             sudo cp /tmp/deploy-bot/migrations/*.py /usr/local/bin/migrations/
             sudo mkdir -p /usr/local/bin/agent
             sudo cp /tmp/deploy-bot/agent/*.py /usr/local/bin/agent/
             sudo install -m 0644 /tmp/deploy-bot/cron.d/model-checks /etc/cron.d/model-checks
-            sudo rm -f /etc/cron.d/model-health-check /etc/cron.d/model-audio-check /etc/cron.d/model-media-check
-            sudo touch /var/log/model-health-check.log /var/log/model-audio-check.log /var/log/model-media-check.log
 
             # Rebuild the sandbox image only when Containerfile actually changed.
-            # Old mtime-based heuristic always triggered because `install` resets
-            # the source mtime on every deploy.
             CF=/usr/local/bin/Containerfile.acpx-claude
             HASH_FILE=${CF}.sha256
             NEW_HASH=$(sudo sha256sum "$CF" | awk '{print $1}')
@@ -89,17 +105,31 @@ jobs:
             fi
 
             rm -rf /tmp/deploy-bot
-            if [ -n "$BOT_PROXY_URL" ] || [ -n "$BOT_PROXY_DISABLED" ]; then
-              sudo install -m 0600 /dev/null /etc/socks-monitor/vds-agent.env
-              {
-                [ -n "$BOT_PROXY_URL" ] && echo "BOT_PROXY_URL=$BOT_PROXY_URL"
-                [ -n "$BOT_PROXY_DISABLED" ] && echo "BOT_PROXY_DISABLED=$BOT_PROXY_DISABLED"
-              } | sudo tee /etc/socks-monitor/vds-agent.env >/dev/null
-            fi
+
+            # Centralized .env (mirror voice-ai). Keeps existing /etc/socks-monitor/.<provider>_key
+            # files intact — vds-agent.py still uses them as fallback.
+            sudo install -m 0600 /dev/null "$APP_DIR/.env"
+            cat << EOF | sudo tee "$APP_DIR/.env" > /dev/null
+            BOT_PROXY_URL=$BOT_PROXY_URL
+            BOT_PROXY_DISABLED=$BOT_PROXY_DISABLED
+            HF_TOKEN=$HF_TOKEN
+            MODEL_LEADERBOARD_TOKEN=$MODEL_LEADERBOARD_TOKEN
+            BOT_BENCHMARK_DISABLED=$BOT_BENCHMARK_DISABLED
+            BOT_ACPX_LOCK_PATH=/var/lock/acpx.lock
+            BOT_ACPX_LOCK_WAIT=30
+            BOT_ACPX_ACTIVE_PATH=/run/vds-agent-active
+            BOT_BENCHMARK_TASKS=/etc/socks-monitor/benchmark-tasks.json
+            BOT_BENCHMARK_METHODOLOGY=/etc/socks-monitor/benchmark-tasks.md
+            BOT_BENCHMARK_DATASETS=/etc/socks-monitor/benchmark-datasets
+            BOT_BENCHMARK_ROOT=/var/lib/vds-agent/sessions/benchmarks
+            EOF
+
+            # Keep HF_TOKEN as a separate read-only key for vds-agent's load_provider_key fallback.
             if [ -n "$HF_TOKEN" ]; then
               sudo install -m 0600 /dev/null /etc/socks-monitor/.hf_key
               echo "$HF_TOKEN" | sudo tee /etc/socks-monitor/.hf_key >/dev/null
             fi
+
             sudo systemctl daemon-reload
             sudo yoyo break-lock --database "sqlite:////var/lib/telegram-llm-bot.db?timeout=60" || true
             sudo /usr/local/bin/migrate_bot_db

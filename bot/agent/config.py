@@ -7,6 +7,8 @@ CONFIG = os.environ.get("BOT_CONFIG", "/etc/socks-monitor/config.json")
 ADMIN_FILE = os.environ.get("BOT_ADMIN_FILE", "/etc/socks-monitor/.admin_id")
 DB_FILE = os.environ.get("BOT_DB_FILE", "/var/lib/telegram-llm-bot.db")
 SESSIONS_ROOT = os.environ.get("BOT_SESSIONS_ROOT", "/var/lib/vds-agent/sessions")
+ACPX_LOCK_PATH = os.environ.get("BOT_ACPX_LOCK_PATH", "/var/lock/acpx.lock")
+ACPX_ACTIVE_PATH = os.environ.get("BOT_ACPX_ACTIVE_PATH", "/run/vds-agent-active")
 
 TUNNEL_URL = os.environ.get("BOT_TUNNEL_URL", "https://ai.smolevich.com")
 MAX_CONTEXT_TOKENS = int(os.environ.get("BOT_MAX_CONTEXT_TOKENS", "64000"))

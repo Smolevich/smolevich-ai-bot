@@ -1,9 +1,10 @@
-# Model health/audio/media checks.
+# Model health/audio/media checks + daily free-models benchmark.
 # Deployed by CI to /etc/cron.d/model-checks.
 # flock prevents overlapping runs; timeout kills a stuck job before the next one starts.
 SHELL=/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 
-*/10 * * * * root  flock -n /var/lock/mhc.lock timeout 540  /usr/local/bin/model-health-check  >> /var/log/model-health-check.log  2>&1
-*/15 * * * * root  flock -n /var/lock/mac.lock timeout 540  /usr/local/bin/model-audio-check   >> /var/log/model-audio-check.log   2>&1
-*/15 * * * * root  flock -n /var/lock/mmc.lock timeout 540  /usr/local/bin/model-media-check   >> /var/log/model-media-check.log   2>&1
+*/10 * * * * root  flock -n /var/lock/mhc.lock    timeout 540   /usr/local/bin/model-health-check  >> /var/log/model-health-check.log  2>&1
+*/15 * * * * root  flock -n /var/lock/mac.lock    timeout 540   /usr/local/bin/model-audio-check   >> /var/log/model-audio-check.log   2>&1
+*/15 * * * * root  flock -n /var/lock/mmc.lock    timeout 540   /usr/local/bin/model-media-check   >> /var/log/model-media-check.log   2>&1
+17 4    * * * root  flock -n /var/lock/mbench.lock timeout 1800  /bin/sh -c '. /opt/smolevich-ai-bot/.env 2>/dev/null || true; . /etc/socks-monitor/vds-agent.env 2>/dev/null || true; [ "$BOT_BENCHMARK_DISABLED" = "1" ] && exit 0; /usr/local/bin/model-benchmark run --max-jobs 200; if [ -n "$MODEL_LEADERBOARD_TOKEN" ]; then /usr/local/bin/model-benchmark leaderboard --publish; /usr/local/bin/model-benchmark leaderboard --publish-tasks; fi; /usr/local/bin/model-benchmark purge' >> /var/log/model-benchmark.log 2>&1

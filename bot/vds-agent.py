@@ -18,6 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import uuid
+from agent.acpx_lock import acpx_lock, touch_active
 from agent.config import (
     ADMIN_FILE,
     CONFIG,
@@ -1070,7 +1071,20 @@ def ask_via_acpx(uid, text, sess):
                 agent, "exec", text,
             ]
         log.info(f"acpx run: {shlex.join(run_cmd[:-1] + ['<task>'])}")
-        r = subprocess.run(run_cmd, capture_output=True, text=True, timeout=180, env=env)
+        touch_active()
+        lock_wait = float(os.environ.get("BOT_ACPX_LOCK_WAIT", "30") or 30)
+        with acpx_lock(timeout=lock_wait, holder=f"user:{uid}") as got_lock:
+            if not got_lock:
+                with runtimeStatusLock:
+                    st = runtimeStatus.get(uid, {})
+                    st.update({"active": False, "last_error_ts": int(time.time())})
+                    runtimeStatus[uid] = st
+                return (
+                    "⏳ Агент сейчас занят другой задачей, попробуйте через минуту.",
+                    {"prompt_tokens": 0, "completion_tokens": 0},
+                    {"finish_reason": "acpx_busy", "tool_calls_total": 0, "error": "lock_busy", "session_id": session_uuid},
+                )
+            r = subprocess.run(run_cmd, capture_output=True, text=True, timeout=180, env=env)
         out = (r.stdout or "").strip()
         err = (r.stderr or "").strip()
         raw = ((r.stdout or "") + (("\n" + r.stderr) if r.stderr else "")).strip()
