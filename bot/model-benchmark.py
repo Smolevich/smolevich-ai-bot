@@ -708,7 +708,7 @@ def infer_strengths(model_id: str, native_score: float, claude_score: float, lat
         strengths.append("Code")
     if any(k in mid for k in ("70b", "120b", "405b", "large", "nemotron", "reason")):
         strengths.append("Reasoning")
-    if "Russian/English" not in strengths:
+    if len(strengths) < 3:
         strengths.append("Russian/English")
     return strengths[:5]
 
@@ -752,7 +752,7 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
         try:
             recent_rows = conn.execute(
                 """
-                SELECT provider, model_id, mode, task_id, sample_id, latency_ms, ok, score, ts, batch_id,
+                SELECT provider, model_id, mode, task_id, sample_id, latency_ms, ok, score, ts,
                        json_extract(details_json, '$.usage.prompt_tokens'),
                        json_extract(details_json, '$.usage.completion_tokens'),
                        json_extract(details_json, '$.usage.total_tokens')
@@ -823,30 +823,13 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
     for row in recent_rows:
         key = (row[0], row[1])
         bucket = results_by_pm.setdefault(key, [])
-        prompt_tokens = int(row[10]) if row[10] is not None else None
-        completion_tokens = int(row[11]) if row[11] is not None else None
-        total_tokens = int(row[12]) if row[12] is not None else None
+        prompt_tokens = int(row[9]) if row[9] is not None else None
+        completion_tokens = int(row[10]) if row[10] is not None else None
+        total_tokens = int(row[11]) if row[11] is not None else None
         if total_tokens is not None:
             tokens_by_pm.setdefault(key, []).append(total_tokens)
         if len(bucket) >= 50:
             continue
-        
-        batch_val = row[9]
-        run_id = None
-        if batch_val:
-            try:
-                from datetime import datetime
-                dt = datetime.strptime(batch_val, "%Y%m%d-%H%M%S")
-                run_id = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-            except Exception:
-                pass
-        if not run_id:
-            try:
-                from datetime import datetime, timezone
-                run_id = datetime.fromtimestamp(int(row[8]), timezone.utc).isoformat().replace("+00:00", "Z")
-            except Exception:
-                run_id = None
-
         entry: dict[str, Any] = {
             "task_id": row[3],
             "mode": row[2],
@@ -855,8 +838,6 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
             "score": float(row[7] or 0.0),
             "latency_ms": int(row[5] or 0),
         }
-        if run_id:
-            entry["run_id"] = run_id
         if prompt_tokens is not None:
             entry["prompt_tokens"] = prompt_tokens
         if completion_tokens is not None:
