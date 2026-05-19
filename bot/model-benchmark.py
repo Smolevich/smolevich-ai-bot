@@ -49,7 +49,7 @@ DEFAULT_MAX_JOBS = 200
 DEFAULT_TIMEOUT = 60
 DEFAULT_CLAUDE_TIMEOUT = 120
 DEFAULT_LOOKBACK_BENCH_HOURS = 168
-MAX_RESPONSE_EXCERPT = 1200
+MAX_RESPONSE_EXCERPT = 4000
 
 ACTIVE_SKIP_WINDOW_SEC = 120
 LEADERBOARD_ENDPOINT = "https://notes-share.smolevich90.workers.dev/api/smolevich-ai-bot/free-models"
@@ -369,11 +369,23 @@ def build_prompt(task: dict[str, Any], sample: dict[str, Any]) -> str:
     return question
 
 
-def native_completion(provider: str, model_id: str, task: dict[str, Any], sample: dict[str, Any], timeout: int) -> tuple[str, int, str | None]:
+def _extract_usage(raw: dict[str, Any]) -> dict[str, int]:
+    usage = raw.get("usage") or {}
+    out: dict[str, int] = {}
+    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        value = usage.get(key)
+        if isinstance(value, (int, float)):
+            out[key] = int(value)
+    return out
+
+
+def native_completion(
+    provider: str, model_id: str, task: dict[str, Any], sample: dict[str, Any], timeout: int
+) -> tuple[str, int, str | None, dict[str, int]]:
     prov = PROVIDERS[provider]
     api_key = load_provider_key(provider)
     if not api_key:
-        return "", 0, "missing_api_key"
+        return "", 0, "missing_api_key", {}
     prompt = build_prompt(task, sample)
     payload = {
         "model": model_id,
@@ -400,22 +412,23 @@ def native_completion(provider: str, model_id: str, task: dict[str, Any], sample
             raw = json.loads(resp.read().decode("utf-8"))
         latency_ms = int((time.time() - started) * 1000)
         choices = raw.get("choices") or []
+        usage = _extract_usage(raw)
         if not choices:
-            return "", latency_ms, "empty_choices"
+            return "", latency_ms, "empty_choices", usage
         message = (choices[0].get("message") or {})
         content = message.get("content")
         if content is None:
             content = choices[0].get("text", "")
-        return str(content or ""), latency_ms, None
+        return str(content or ""), latency_ms, None, usage
     except urllib.error.HTTPError as e:
         body = ""
         try:
             body = e.read().decode("utf-8", errors="replace")[:300]
         except Exception:
             pass
-        return "", int((time.time() - started) * 1000), f"HTTP {e.code}: {e.reason} {body}".strip()
+        return "", int((time.time() - started) * 1000), f"HTTP {e.code}: {e.reason} {body}".strip(), {}
     except Exception as e:
-        return "", int((time.time() - started) * 1000), str(e)[:500]
+        return "", int((time.time() - started) * 1000), str(e)[:500], {}
 
 
 def provider_base_url(provider: str) -> str:
@@ -567,8 +580,9 @@ def run_job(args: argparse.Namespace, job: dict[str, Any]) -> dict[str, Any]:
     sample = job["sample"]
     mode = job["mode"]
     workspace: Path | None = None
+    usage: dict[str, int] = {}
     if mode == "native":
-        response, latency_ms, error = native_completion(provider, model_id, task, sample, args.timeout)
+        response, latency_ms, error, usage = native_completion(provider, model_id, task, sample, args.timeout)
     else:
         response, latency_ms, error, workspace = claude_completion(
             provider, model_id, task, sample, args.claude_timeout, Path(args.benchmark_root),
@@ -593,6 +607,7 @@ def run_job(args: argparse.Namespace, job: dict[str, Any]) -> dict[str, Any]:
             "detail": detail,
             "workspace": str(workspace) if workspace else "",
             "ground_truth": ground_truth,
+            "usage": usage,
         },
     }
     if workspace is not None:
@@ -737,7 +752,10 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
         try:
             recent_rows = conn.execute(
                 """
-                SELECT provider, model_id, mode, task_id, sample_id, latency_ms, ok, score, ts
+                SELECT provider, model_id, mode, task_id, sample_id, latency_ms, ok, score, ts,
+                       json_extract(details_json, '$.usage.prompt_tokens'),
+                       json_extract(details_json, '$.usage.completion_tokens'),
+                       json_extract(details_json, '$.usage.total_tokens')
                 FROM model_benchmark_results
                 WHERE ts >= ?
                 ORDER BY ts DESC
@@ -801,21 +819,32 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
 
     # Task results per (provider, model) — последние 50 строк
     results_by_pm: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    tokens_by_pm: dict[tuple[str, str], list[int]] = {}
     for row in recent_rows:
         key = (row[0], row[1])
         bucket = results_by_pm.setdefault(key, [])
+        prompt_tokens = int(row[9]) if row[9] is not None else None
+        completion_tokens = int(row[10]) if row[10] is not None else None
+        total_tokens = int(row[11]) if row[11] is not None else None
+        if total_tokens is not None:
+            tokens_by_pm.setdefault(key, []).append(total_tokens)
         if len(bucket) >= 50:
             continue
-        bucket.append(
-            {
-                "task_id": row[3],
-                "mode": row[2],
-                "sample_id": row[4] or "",
-                "ok": bool(row[6]),
-                "score": float(row[7] or 0.0),
-                "latency_ms": int(row[5] or 0),
-            }
-        )
+        entry: dict[str, Any] = {
+            "task_id": row[3],
+            "mode": row[2],
+            "sample_id": row[4] or "",
+            "ok": bool(row[6]),
+            "score": float(row[7] or 0.0),
+            "latency_ms": int(row[5] or 0),
+        }
+        if prompt_tokens is not None:
+            entry["prompt_tokens"] = prompt_tokens
+        if completion_tokens is not None:
+            entry["completion_tokens"] = completion_tokens
+        if total_tokens is not None:
+            entry["total_tokens"] = total_tokens
+        bucket.append(entry)
 
     ranked: list[dict[str, Any]] = []
     for hrow in health_rows:
@@ -848,6 +877,8 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
                 notes += f", claude {claude_score:.0%}."
             else:
                 notes += "."
+        tokens_list = tokens_by_pm.get((provider, model_id)) or []
+        avg_tokens = round(sum(tokens_list) / len(tokens_list)) if tokens_list else None
         ranked.append(
             {
                 "score": overall,
@@ -866,6 +897,7 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
                         "claude": round(claude_score, 3) if claude_runs else None,
                         "overall": round(overall, 3),
                     },
+                    "avg_total_tokens": avg_tokens,
                 },
             }
         )
