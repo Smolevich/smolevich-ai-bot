@@ -116,6 +116,22 @@ Default seed is the current UTC date (`YYYYMMDD`) — re-running on the same day
 
 GPQA-Diamond, MMLU-Pro and other heavier sets can be added later without DB migrations — extend `benchmark-tasks.json` and drop a new dataset JSON into `bot/benchmark-datasets/`.
 
+## TODO: candidate datasets to add
+
+GSM8K is solid for the free-tier band today but only covers grade-school math and is starting to saturate on the strongest free models. Candidates to evaluate next (all auto-scorable, no LLM judge needed):
+
+| Candidate | Why interesting | Scorer fit |
+| --- | --- | --- |
+| [TIGER-Lab/MMLU-Pro](https://huggingface.co/datasets/TIGER-Lab/MMLU-Pro) | 12K multi-domain Qs, 10 options (vs MMLU's 4), still not saturated; cleanly separates 7B↔70B | exact-match on letter |
+| [Idavidrein/gpqa](https://huggingface.co/datasets/Idavidrein/gpqa) (Diamond split) | 198 "PhD-level" bio/chem/physics Qs; modern reference for top models, stress-test for free-tier | exact-match on letter |
+| [HuggingFaceH4/MATH-500](https://huggingface.co/datasets/HuggingFaceH4/MATH-500) | Direct difficulty upgrade over GSM8K | `\boxed{}` regex + symbolic equivalence (reuses existing pipeline) |
+| [Maxwell-Jia/AIME_2024](https://huggingface.co/datasets/Maxwell-Jia/AIME_2024) / AIME 2025 | 30 tasks, integer answer 0–999; tiny → cheap to run, still discriminating | numeric exact-match |
+| [openai/openai_humaneval](https://huggingface.co/datasets/openai/openai_humaneval) / [evalplus/mbppplus](https://huggingface.co/datasets/evalplus/mbppplus) | Code generation; would fit naturally as a `claude` mode task inside `acpx` | unit-tests in sandbox |
+| [lukaemon/bbh](https://huggingface.co/datasets/lukaemon/bbh) | 23 reasoning sub-tasks; broad logic coverage | mix of exact-match / regex |
+| [google/IFEval](https://huggingface.co/datasets/google/IFEval) | Instruction-following with verifiable constraints | rule-based programmatic |
+
+First picks if/when we extend: MMLU-Pro (best discrimination), MATH-500 (reuses GSM8K-style scorer), IFEval (different axis, cheap).
+
 ## Concurrency & locking
 
 - **`/var/lock/acpx.lock`** — shared flock between the bot's claude chat handler and the benchmark's claude task. Only one acpx/podman container runs at a time. `BOT_ACPX_LOCK_WAIT` controls how long a user chat waits before responding "agent busy" (default 30 s).
