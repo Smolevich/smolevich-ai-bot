@@ -50,7 +50,9 @@ DEFAULT_NATIVE_WORKERS = 4
 DEFAULT_MAX_JOBS = 200
 DEFAULT_TIMEOUT = 60
 DEFAULT_CLAUDE_TIMEOUT = 120
-DEFAULT_LOOKBACK_BENCH_HOURS = 168
+DEFAULT_LOOKBACK_BENCH_HOURS = 48
+HALF_LIFE_BENCH_SEC = 12 * 3600
+HALF_LIFE_HEALTH_SEC = 12 * 3600
 MAX_RESPONSE_EXCERPT = 4000
 
 ACTIVE_SKIP_WINDOW_SEC = 120
@@ -85,6 +87,19 @@ DEFAULT_BENCHMARK_ROOT = os.environ.get(
 
 def now_ts() -> int:
     return int(time.time())
+
+
+def ewma(samples: list[tuple[int, float]], now: int, half_life_sec: int) -> float:
+    """Exponentially weighted average. Newer samples weigh more; half_life_sec controls decay."""
+    if not samples:
+        return 0.0
+    num = 0.0
+    den = 0.0
+    for ts, val in samples:
+        w = 2.0 ** (-max(0, now - ts) / float(half_life_sec))
+        num += w * val
+        den += w
+    return num / den if den else 0.0
 
 
 def iso_local_time(ts: Any) -> str | None:
@@ -753,30 +768,11 @@ def context_window_hint(model_id: str) -> str:
 
 
 def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
-    cutoff = now_ts() - max(1, args.lookback_hours) * 3600
+    now = now_ts()
+    cutoff = now - max(1, args.lookback_hours) * 3600
     tasks = load_tasks(args.tasks_path)
     with connect(args.db) as conn:
         conn.row_factory = sqlite3.Row
-        try:
-            agg_rows = conn.execute(
-                """
-                SELECT provider, model_id, mode,
-                       COUNT(*) AS runs,
-                       SUM(CASE WHEN ok = 1 THEN 1 ELSE 0 END) AS ok_runs,
-                       AVG(score) AS avg_score,
-                       AVG(CASE WHEN ok = 1 AND latency_ms > 0 THEN latency_ms END) AS avg_latency_ms,
-                       MAX(ts) AS last_bench
-                FROM model_benchmark_results
-                WHERE ts >= ?
-                GROUP BY provider, model_id, mode
-                """,
-                (cutoff,),
-            ).fetchall()
-        except sqlite3.OperationalError as e:
-            if "no such table" in str(e).lower():
-                agg_rows = []
-            else:
-                raise
         try:
             recent_rows = conn.execute(
                 """
@@ -791,7 +787,8 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
                 (cutoff,),
             ).fetchall()
         except sqlite3.OperationalError as e:
-            if "no such column" in str(e).lower() and "batch_id" in str(e).lower():
+            msg = str(e).lower()
+            if "no such column" in msg and "batch_id" in msg:
                 recent_rows = conn.execute(
                     """
                     SELECT provider, model_id, mode, task_id, sample_id, latency_ms, ok, score, ts,
@@ -805,62 +802,39 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
                     """,
                     (cutoff,),
                 ).fetchall()
-            else:
+            elif "no such table" in msg:
                 recent_rows = []
+            else:
+                raise
         try:
-            health_rows = conn.execute(
+            health_log_rows = conn.execute(
                 """
-                SELECT mh.provider, mh.model_id, mh.available, mh.latency_ms,
-                       COALESCE(h.checks, 0),
-                       COALESCE(h.ok_checks, 0),
-                       COALESCE(CAST(h.ok_checks AS REAL) / NULLIF(h.checks, 0), 0.0) AS rate,
-                       COALESCE(h.avg_latency_ms, NULLIF(mh.latency_ms, 0), 999999) AS latency
-                FROM model_health mh
-                LEFT JOIN (
-                    SELECT provider, model_id,
-                           COUNT(*) AS checks,
-                           SUM(CASE WHEN available = 1 THEN 1 ELSE 0 END) AS ok_checks,
-                           AVG(CASE WHEN available = 1 AND latency_ms > 0 THEN latency_ms END) AS avg_latency_ms
-                    FROM model_health_log
-                    WHERE ts >= ?
-                    GROUP BY provider, model_id
-                ) h ON h.provider = mh.provider AND h.model_id = mh.model_id
-                WHERE mh.category = 'text' AND mh.available = 1
+                SELECT provider, model_id, ts, available, latency_ms
+                FROM model_health_log
+                WHERE ts >= ?
                 """,
                 (cutoff,),
             ).fetchall()
         except sqlite3.OperationalError:
-            health_rows = []
+            health_log_rows = []
+        try:
+            model_rows = conn.execute(
+                """
+                SELECT provider, model_id, latency_ms
+                FROM model_health
+                WHERE category = 'text' AND available = 1
+                """
+            ).fetchall()
+        except sqlite3.OperationalError:
+            model_rows = []
 
-    # Pivot bench aggregates per (provider, model)
-    bench_by_pm: dict[tuple[str, str], dict[str, Any]] = {}
-    for row in agg_rows:
-        key = (row[0], row[1])
-        entry = bench_by_pm.setdefault(
-            key,
-            {"native_runs": 0, "native_ok": 0, "native_score": 0.0,
-             "claude_runs": 0, "claude_ok": 0, "claude_score": 0.0,
-             "latency_ms": 0, "last_bench": 0},
-        )
-        mode = row[2]
-        runs = int(row[3] or 0)
-        ok_runs = int(row[4] or 0)
-        avg_score = float(row[5] or 0.0)
-        avg_latency = int(row[6] or 0) if row[6] else 0
-        last_bench = int(row[7] or 0)
-        if mode == "native":
-            entry["native_runs"] = runs
-            entry["native_ok"] = ok_runs
-            entry["native_score"] = avg_score
-        elif mode == "claude":
-            entry["claude_runs"] = runs
-            entry["claude_ok"] = ok_runs
-            entry["claude_score"] = avg_score
-        if avg_latency:
-            entry["latency_ms"] = (entry["latency_ms"] + avg_latency) // 2 if entry["latency_ms"] else avg_latency
-        entry["last_bench"] = max(entry["last_bench"], last_bench)
+    # Aggregate bench results per (provider, model, mode) with EWMA over the window.
+    bench_score_samples: dict[tuple[str, str, str], list[tuple[int, float]]] = {}
+    bench_latency_samples: dict[tuple[str, str, str], list[tuple[int, float]]] = {}
+    bench_runs: dict[tuple[str, str, str], int] = {}
+    bench_last_ts: dict[tuple[str, str], int] = {}
 
-    # Task results per (provider, model) — последние 50 строк
+    # Task results per (provider, model) — последние 50 строк для дисплея.
     results_by_pm: dict[tuple[str, str], list[dict[str, Any]]] = {}
     tokens_by_pm: dict[tuple[str, str], list[int]] = {}
     batch_ts: dict[str, int] = {}
@@ -869,26 +843,42 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
         ts = int(row["ts"] or 0)
         if batch_id and ts:
             batch_ts[batch_id] = min(ts, batch_ts.get(batch_id, ts))
+
     for row in recent_rows:
-        key = (row["provider"], row["model_id"])
-        bucket = results_by_pm.setdefault(key, [])
+        provider = row["provider"]
+        model_id = row["model_id"]
+        mode = row["mode"]
+        ts = int(row["ts"] or 0)
+        score = float(row["score"] or 0.0)
+        ok = bool(row["ok"])
+        latency_ms_row = int(row["latency_ms"] or 0)
+        key3 = (provider, model_id, mode)
+        pm = (provider, model_id)
+
+        bench_score_samples.setdefault(key3, []).append((ts, score))
+        bench_runs[key3] = bench_runs.get(key3, 0) + 1
+        if ok and latency_ms_row > 0:
+            bench_latency_samples.setdefault(key3, []).append((ts, float(latency_ms_row)))
+        bench_last_ts[pm] = max(bench_last_ts.get(pm, 0), ts)
+
+        bucket = results_by_pm.setdefault(pm, [])
         prompt_tokens = int(row["prompt_tokens"]) if row["prompt_tokens"] is not None else None
         completion_tokens = int(row["completion_tokens"]) if row["completion_tokens"] is not None else None
         total_tokens = int(row["total_tokens"]) if row["total_tokens"] is not None else None
         if total_tokens is not None:
-            tokens_by_pm.setdefault(key, []).append(total_tokens)
+            tokens_by_pm.setdefault(pm, []).append(total_tokens)
         if len(bucket) >= 50:
             continue
         batch_id = str(row["batch_id"] or "")
-        run_ts = batch_ts.get(batch_id) if batch_id else int(row["ts"] or 0)
+        run_ts = batch_ts.get(batch_id) if batch_id else ts
         run_id = iso_local_time(run_ts)
         entry: dict[str, Any] = {
             "task_id": row["task_id"],
-            "mode": row["mode"],
+            "mode": mode,
             "sample_id": row["sample_id"] or "",
-            "ok": bool(row["ok"]),
-            "score": float(row["score"] or 0.0),
-            "latency_ms": int(row["latency_ms"] or 0),
+            "ok": ok,
+            "score": score,
+            "latency_ms": latency_ms_row,
         }
         if run_id:
             entry["run_id"] = run_id
@@ -900,30 +890,64 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
             entry["total_tokens"] = total_tokens
         bucket.append(entry)
 
+    # Aggregate health log per (provider, model) for EWMA.
+    health_avail_samples: dict[tuple[str, str], list[tuple[int, float]]] = {}
+    health_latency_samples: dict[tuple[str, str], list[tuple[int, float]]] = {}
+    for row in health_log_rows:
+        pm = (row["provider"], row["model_id"])
+        ts = int(row["ts"] or 0)
+        available = 1.0 if int(row["available"] or 0) else 0.0
+        latency = int(row["latency_ms"] or 0)
+        health_avail_samples.setdefault(pm, []).append((ts, available))
+        if available and latency > 0:
+            health_latency_samples.setdefault(pm, []).append((ts, float(latency)))
+
     ranked: list[dict[str, Any]] = []
-    for hrow in health_rows:
-        provider = hrow[0]
-        model_id = hrow[1]
-        health_rate = float(hrow[6] or 0.0)
-        latency_ms = int(hrow[7] or 0)
-        bench = bench_by_pm.get((provider, model_id))
-        native_runs = int(bench["native_runs"]) if bench else 0
-        claude_runs = int(bench["claude_runs"]) if bench else 0
-        native_score = float(bench["native_score"]) if bench else 0.0
-        claude_score = float(bench["claude_score"]) if bench else 0.0
-        if bench and bench["latency_ms"]:
-            latency_ms = int(bench["latency_ms"])
-        last_bench = int(bench["last_bench"]) if bench else 0
+    for mrow in model_rows:
+        provider = mrow["provider"]
+        model_id = mrow["model_id"]
+        pm = (provider, model_id)
+
+        health_rate = ewma(health_avail_samples.get(pm, []), now, HALF_LIFE_HEALTH_SEC)
+        health_latency = int(ewma(health_latency_samples.get(pm, []), now, HALF_LIFE_HEALTH_SEC))
+        fallback_latency = int(mrow["latency_ms"] or 0)
+        latency_ms = health_latency or fallback_latency or 0
+
+        native_key = (provider, model_id, "native")
+        claude_key = (provider, model_id, "claude")
+        native_runs = bench_runs.get(native_key, 0)
+        claude_runs = bench_runs.get(claude_key, 0)
+        native_score = ewma(bench_score_samples.get(native_key, []), now, HALF_LIFE_BENCH_SEC) if native_runs else 0.0
+        claude_score = ewma(bench_score_samples.get(claude_key, []), now, HALF_LIFE_BENCH_SEC) if claude_runs else 0.0
+        bench_lat_native = int(ewma(bench_latency_samples.get(native_key, []), now, HALF_LIFE_BENCH_SEC))
+        bench_lat_claude = int(ewma(bench_latency_samples.get(claude_key, []), now, HALF_LIFE_BENCH_SEC))
+        bench_lat = bench_lat_native or bench_lat_claude
+        if bench_lat:
+            latency_ms = (latency_ms + bench_lat) // 2 if latency_ms else bench_lat
+
+        last_bench = bench_last_ts.get(pm, 0)
+
         if (native_runs + claude_runs) == 0 and not args.include_unbenchmarked:
             continue
-        bench_score = (native_score * 0.65) + (claude_score * 0.35 if claude_runs else 0.0)
+
+        if native_runs and claude_runs:
+            bench_score = native_score * 0.65 + claude_score * 0.35
+        elif claude_runs:
+            bench_score = claude_score
+        elif native_runs:
+            bench_score = native_score
+        else:
+            bench_score = 0.0
+
         latency_bonus = max(0.0, min(0.1, (6000 - latency_ms) / 60000.0)) if latency_ms else 0.0
         overall = health_rate * 0.45 + bench_score * 0.45 + latency_bonus
+
         status = "available"
         if health_rate < 0.75:
             status = "unstable"
         elif (native_runs + claude_runs) and bench_score < 0.6:
             status = "unstable"
+
         notes = "Reliable in recent health checks."
         if (native_runs + claude_runs):
             notes = f"Pass rate: native {native_score:.0%}"
@@ -931,14 +955,16 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
                 notes += f", claude {claude_score:.0%}."
             else:
                 notes += "."
-        tokens_list = tokens_by_pm.get((provider, model_id)) or []
+
+        tokens_list = tokens_by_pm.get(pm) or []
         avg_tokens = round(sum(tokens_list) / len(tokens_list)) if tokens_list else None
+
         ranked.append(
             {
                 "score": overall,
                 "latency_ms": latency_ms,
                 "last_bench": last_bench,
-                "task_results": results_by_pm.get((provider, model_id), []),
+                "task_results": results_by_pm.get(pm, []),
                 "model": {
                     "model": model_id,
                     "provider": PROVIDER_LABELS.get(provider, provider),
@@ -964,7 +990,7 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
         models.append(m)
     return {
         "source": "smolevich-ai-bot",
-        "updated_at": now_ts(),
+        "updated_at": now,
         "tasks": tasks,
         "models": models,
     }
