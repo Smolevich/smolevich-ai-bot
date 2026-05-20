@@ -9,7 +9,7 @@ A Telegram bot that gives you one chat interface in front of several LLM provide
 - **Multi-provider chat** — switch providers and models on the fly with `/provider` and `/models`.
 - **Code sandbox** — the `execute_bash` tool runs commands inside a per-user Podman container (`acpx-claude:latest`), with persistent workspace volumes per user.
 - **Health checks** — text/code model checks run via `model-health-check` cron; audio checks (STT/TTS) run via separate `model-audio-check` cron; image/video discovery runs via separate `model-media-check` cron.
-- **Daily free-models benchmark** — `model-benchmark` runs at 04:17 UTC, picks the three most stable text models per provider for native chat tasks and the top-1 model for a claude tool-use task, scores them automatically and publishes the leaderboard and methodology to the site.
+- **Free-models benchmark** — `model-benchmark` runs twice daily (07:00 and 19:00 UTC), picks the three most stable text models per provider for native chat tasks and the top-1 model for a claude tool-use task, scores them automatically and publishes the leaderboard and methodology to the site.
 - **Stats** — `/top` and `/status` summarise usage, success rate and per-provider/per-model delivery counts.
 - **Subscription gate** — first-time users are asked to subscribe to a Telegram channel before they get access; admin can approve/deny manually.
 - **Multiple engine modes** — `/mode` toggles between native (direct OpenAI-compatible API call), Claude Code via ACP, opencode, and a "pi" experimental mode.
@@ -35,7 +35,7 @@ Provider API keys used by the bot are the bot owner’s personal keys. Stored op
 
 ## Free-models benchmark
 
-A daily cron (`04:17 UTC`) picks the most stable free models per provider, runs GSM8K in `native` and `claude` tool-use modes, auto-scores the results, and publishes the leaderboard + methodology to the site. Scores are EWMA-weighted over a 48-hour window.
+A twice-daily cron (07:00 and 19:00 UTC) picks the most stable free models per provider, runs GSM8K in `native` and `claude` tool-use modes, auto-scores the results, and publishes the leaderboard + methodology to the site. Scores are EWMA-weighted over a 48-hour window.
 
 Full methodology, scoring formula, datasets and endpoints: [docs/benchmark.md](docs/benchmark.md).
 

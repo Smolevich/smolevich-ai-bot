@@ -7,7 +7,7 @@ Telegram bot using free-tier LLM providers with a Podman sandbox. Runs on a VDS 
 - `bot/vds-agent.py` — Telegram polling/webhook entrypoint shim.
 - `bot/agent/` — typed runtime modules (`config.py`, `text.py`, `db.py`, `entities.py`, `provider_api.py`, `telegram_api.py`, `acpx_lock.py`, `benchmark_scoring.py`).
 - `bot/model-{health,audio,media}-check.py` — provider/model probes (cron).
-- `bot/model-benchmark.py` — daily free-models benchmark (cron, 04:17 UTC).
+- `bot/model-benchmark.py` — free-models benchmark (cron, 07:00 and 19:00 UTC).
 - `bot/migrate.py` + `bot/migrations/` — yoyo migrations against the SQLite DB.
 
 Full file map: [docs/structure.md](docs/structure.md).
@@ -40,7 +40,7 @@ Full deploy / cron / server-prep runbook: [docs/deploy.md](docs/deploy.md).
 
 ## Benchmark
 
-Daily cron (`04:17 UTC`) selects the top stable free models per provider, runs GSM8K in native (all three) and claude tool-use (top-1), auto-scores, and publishes the leaderboard. Scores are EWMA-weighted over a 48-hour window.
+A twice-daily cron (`07:00` and `19:00` UTC) selects the top stable free models per provider, runs GSM8K in native (all three) and claude tool-use (top-1), auto-scores, and publishes the leaderboard. Scores are EWMA-weighted over a 48-hour window.
 
 Methodology, scoring, locking, datasets and endpoints: [docs/benchmark.md](docs/benchmark.md).
 

@@ -6,7 +6,7 @@ The Russian-language version of the methodology that ships to the site lives in 
 
 ## Pipeline
 
-Daily cron at **04:17 UTC** (`/etc/cron.d/model-checks`) runs:
+Cron at **07:00 and 19:00 UTC** (`/etc/cron.d/model-checks`, twice daily) runs:
 
 ```
 model-benchmark run --max-jobs 200
