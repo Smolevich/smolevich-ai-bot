@@ -35,68 +35,14 @@ Provider API keys used by the bot are the bot owner’s personal keys. Stored op
 
 ## Free-models benchmark
 
-Daily cron (`/etc/cron.d/model-checks`, 04:17 UTC) runs the full pipeline:
-`model-benchmark run → leaderboard --publish → leaderboard --publish-tasks → purge`.
+A daily cron (`04:17 UTC`) picks the most stable free models per provider, runs GSM8K in `native` and `claude` tool-use modes, auto-scores the results, and publishes the leaderboard + methodology to the site. Scores are EWMA-weighted over a 48-hour window.
 
-### Methodology
-
-- Three most stable text models per provider (last 7 days, `success_rate ≥ 0.9`, `checks ≥ 6`, latency ≤ 8 s) are graded on a **native** chat task. The top-1 of those three additionally runs a **claude** tool-use task inside the same podman sandbox the bot uses for user chats.
-- Tasks live in [`bot/benchmark-tasks.json`](bot/benchmark-tasks.json), human-readable methodology in [`bot/benchmark-tasks.md`](bot/benchmark-tasks.md).
-- Auto-scoring only (no LLM judge): `bot/agent/benchmark_scoring.py` extracts numeric answers via regex chain (`####`, `\boxed{}`, `ANSWER:`, last number) and compares with `abs(diff) < 1e-3`. Claude tool-use scoring gives 0.5 for a non-empty `scratch.md` (proof of tool use) + 0.5 for a correct `answer.txt`.
-- One acpx/podman container runs on the host at a time — a global flock (`bot/agent/acpx_lock.py`) is shared between the bot and the benchmark, so the benchmark never collides with a live user chat.
-- Cron `BOT_BENCHMARK_DISABLED=1` env var is a kill switch; results retention is 30 days, jobs 7 days, purged daily.
-
-### Datasets
-
-Sample fixtures live in `bot/benchmark-datasets/`:
-
-| File | Source | License | Sample size |
-|------|--------|---------|-------------|
-| `gsm8k.json` | [openai/gsm8k](https://huggingface.co/datasets/openai/gsm8k) (config `main`, split `test`) | MIT | 15 |
-
-Schema of each file:
-
-```json
-{
-  "dataset": "openai/gsm8k",
-  "config": "main",
-  "split": "test",
-  "license": "MIT",
-  "source_url": "https://huggingface.co/datasets/openai/gsm8k",
-  "fetched_at": "2026-05-19T11:00:00Z",
-  "seed": 20260519,
-  "samples": [
-    {
-      "id": "gsm8k_test_42",
-      "source": "openai/gsm8k:test",
-      "question": "...",
-      "ground_truth": 42,
-      "raw_answer": "step-by-step ... #### 42"
-    }
-  ]
-}
-```
-
-Refresh manually:
-
-```sh
-python3 bot/scripts/refresh-benchmark-datasets.py --out bot/benchmark-datasets
-```
-
-Default seed is the current UTC date (`YYYYMMDD`) — re-running on the same day reproduces the same items. Use `--seed N` for a custom seed.
-
-### Endpoints
-
-- `GET https://notes-share.smolevich90.workers.dev/api/smolevich-ai-bot/free-models` — leaderboard payload (with optional `tasks` and per-model `task_results`).
-- `GET https://notes-share.smolevich90.workers.dev/api/smolevich-ai-bot/benchmark-tasks` — open methodology (`tasks` + `methodology_md`).
-
-GPQA-Diamond, MMLU-Pro and other heavier sets can be added later without DB
-migrations — extend `benchmark-tasks.json` and drop a new dataset JSON into
-`bot/benchmark-datasets/`.
+Full methodology, scoring formula, datasets and endpoints: [docs/benchmark.md](docs/benchmark.md).
 
 ## Docs
 
 - [CLAUDE.md](CLAUDE.md) — high-level pointers (also linked as `AGENTS.md`).
-- [.claude/structure.md](.claude/structure.md) — what's in the repo.
-- [.claude/config.md](.claude/config.md) — env vars, paths on the VDS, server-side binaries.
-- [.claude/deploy.md](.claude/deploy.md) — automatic and manual deploy, cron jobs, verification commands, benchmark prerequisites.
+- [docs/structure.md](docs/structure.md) — what's in the repo.
+- [docs/config.md](docs/config.md) — env vars, paths on the VDS, server-side binaries.
+- [docs/deploy.md](docs/deploy.md) — automatic and manual deploy, cron jobs, verification commands, server prerequisites.
+- [docs/benchmark.md](docs/benchmark.md) — free-models benchmark methodology, scoring, locking, datasets and endpoints.

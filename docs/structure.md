@@ -9,7 +9,7 @@ Everything bot-related lives in `bot/`:
 - `bot/model-health-check.py` — text/code model health cron job, writes provider/model availability into the bot DB.
 - `bot/model-audio-check.py` — separate audio (STT/TTS) health cron job.
 - `bot/model-media-check.py` — image/video model discovery cron job.
-- `bot/model-benchmark.py` — daily free-models benchmark queue (subcommands `enqueue`, `work`, `run`, `leaderboard`, `tasks`, `refresh-datasets`, `purge`); writes to `model_benchmark_jobs` / `model_benchmark_results` in the bot DB.
+- `bot/model-benchmark.py` — daily free-models benchmark queue (subcommands `enqueue`, `work`, `run`, `leaderboard`, `tasks`, `refresh-datasets`, `purge`); writes to `model_benchmark_jobs` / `model_benchmark_results` in the bot DB. Details in [benchmark.md](benchmark.md).
 - `bot/benchmark-tasks.json` — open methodology (task list with kind / dataset / license / source URL).
 - `bot/benchmark-tasks.md` — human-readable methodology, published to the site.
 - `bot/benchmark-datasets/` — fixed JSON samples from public HF datasets (currently GSM8K test, 15 random rows).
