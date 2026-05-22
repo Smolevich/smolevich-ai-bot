@@ -982,8 +982,15 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
             }
         )
     ranked.sort(key=lambda item: (item["score"], -item["latency_ms"], item["last_bench"]), reverse=True)
+    seen_providers: set[str] = set()
+    top_per_provider: list[dict[str, Any]] = []
+    for item in ranked:
+        prov = item["model"]["provider"]
+        if prov not in seen_providers:
+            seen_providers.add(prov)
+            top_per_provider.append(item)
     models = []
-    for idx, item in enumerate(ranked[: args.limit], start=1):
+    for idx, item in enumerate(top_per_provider, start=1):
         m = item["model"]
         m["rank"] = idx
         m["task_results"] = item["task_results"]
