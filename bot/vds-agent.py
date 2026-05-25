@@ -1049,7 +1049,20 @@ def ask_via_acpx(uid, text, sess):
             # Direct invocation — pi-acp wrapper inside acpx pulls a different
             # package via npx at runtime and fails auth. Native pi binary in
             # the image accepts --provider with the native env var set above.
-            pi_cmd = ["pi", "-p", "--no-session", "--model", mode_model, "--provider", provider, text]
+            # Pi's default coding prompt/context is large enough to trip
+            # free-tier TPM limits, so keep the one-shot harness lean.
+            pi_cmd = [
+                "pi", "-p", "--no-session",
+                "--model", mode_model,
+                "--provider", provider,
+                "--system-prompt", "You are a concise sandboxed coding assistant. Use tools only when needed. Return essential output.",
+                "--no-context-files",
+                "--no-extensions",
+                "--no-skills",
+                "--no-prompt-templates",
+                "--no-themes",
+                text,
+            ]
             run_cmd = podman_base + pi_cmd
         elif agent == "opencode":
             # `opencode run` needs an interactive auth setup that doesn't apply

@@ -13,6 +13,22 @@ from pathlib import Path
 DB_FILE = "/var/lib/telegram-llm-bot.db"
 PROXY_FILE = "/etc/socks-monitor/.proxy_url"
 
+
+def _resolve_proxy():
+    if os.environ.get("BOT_PROXY_DISABLED", "").strip():
+        return ""
+    val = os.environ.get("BOT_PROXY_URL", "")
+    if val:
+        return val
+    try:
+        return Path(PROXY_FILE).read_text().strip()
+    except Exception:
+        return ""
+
+
+PROXY_URL = _resolve_proxy()
+USE_PROXY = not os.environ.get("BOT_PROXY_DISABLED", "").strip()
+
 PROVIDERS = {
     "openrouter": {
         "models_url": "https://shir-man.com/api/free-llm/top-models",
@@ -25,13 +41,13 @@ PROVIDERS = {
         "models_url": "https://api.groq.com/openai/v1/models",
         "key_file": "/etc/socks-monitor/.groq_key",
         "supports_tools": True,
-        "proxy": True,
+        "proxy": USE_PROXY,
     },
     "cerebras": {
         "models_url": "https://api.cerebras.ai/v1/models",
         "key_file": "/etc/socks-monitor/.cerebras_key",
         "supports_tools": False,
-        "proxy": True,
+        "proxy": USE_PROXY,
     },
     "nvidia": {
         "models_url": "https://integrate.api.nvidia.com/v1/models",
@@ -53,21 +69,6 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 log = logging.getLogger(__name__)
-
-
-def _resolve_proxy():
-    if os.environ.get("BOT_PROXY_DISABLED", "").strip():
-        return ""
-    val = os.environ.get("BOT_PROXY_URL", "")
-    if val:
-        return val
-    try:
-        return Path(PROXY_FILE).read_text().strip()
-    except Exception:
-        return ""
-
-
-PROXY_URL = _resolve_proxy()
 
 
 def load_key(provider_name):

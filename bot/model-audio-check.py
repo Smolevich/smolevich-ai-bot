@@ -17,27 +17,6 @@ DB_FILE = "/var/lib/telegram-llm-bot.db"
 PROXY_FILE = "/etc/socks-monitor/.proxy_url"
 TIMEOUT_SEC = 45
 
-PROVIDERS = {
-    "groq": {
-        "models_url": "https://api.groq.com/openai/v1/models",
-        "base_url": "https://api.groq.com/openai/v1",
-        "key_file": "/etc/socks-monitor/.groq_key",
-        "proxy": True,
-        "supports_tools": True,
-    },
-    "nvidia": {
-        "models_url": "https://integrate.api.nvidia.com/v1/models",
-        "base_url": "https://integrate.api.nvidia.com/v1",
-        "key_file": "/etc/socks-monitor/.nvidia_key",
-        "proxy": False,
-        "supports_tools": True,
-    },
-}
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
-                    handlers=[logging.StreamHandler(sys.stdout)])
-log = logging.getLogger(__name__)
-
 
 def _resolve_proxy():
     if os.environ.get("BOT_PROXY_DISABLED", "").strip():
@@ -52,6 +31,28 @@ def _resolve_proxy():
 
 
 PROXY_URL = _resolve_proxy()
+USE_PROXY = not os.environ.get("BOT_PROXY_DISABLED", "").strip()
+
+PROVIDERS = {
+    "groq": {
+        "models_url": "https://api.groq.com/openai/v1/models",
+        "base_url": "https://api.groq.com/openai/v1",
+        "key_file": "/etc/socks-monitor/.groq_key",
+        "proxy": USE_PROXY,
+        "supports_tools": True,
+    },
+    "nvidia": {
+        "models_url": "https://integrate.api.nvidia.com/v1/models",
+        "base_url": "https://integrate.api.nvidia.com/v1",
+        "key_file": "/etc/socks-monitor/.nvidia_key",
+        "proxy": False,
+        "supports_tools": True,
+    },
+}
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
+                    handlers=[logging.StreamHandler(sys.stdout)])
+log = logging.getLogger(__name__)
 
 
 def load_key(provider_name):

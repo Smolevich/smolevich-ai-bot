@@ -29,6 +29,7 @@ def _resolve_proxy():
 
 
 PROXY_URL = _resolve_proxy()
+USE_PROXY = not os.environ.get("BOT_PROXY_DISABLED", "").strip()
 
 HEALTH_CHECK_PROMPT = "Ответь одним словом: столица Франции?"
 HEALTH_CHECK_MAX_TOKENS = 10
@@ -51,14 +52,14 @@ PROVIDERS = {
         "models_url": "https://api.groq.com/openai/v1/models",
         "key_file": "/etc/socks-monitor/.groq_key",
         "supports_tools": True,
-        "proxy": True,
+        "proxy": USE_PROXY,
     },
     "cerebras": {
         "url": "https://api.cerebras.ai/v1/chat/completions",
         "models_url": "https://api.cerebras.ai/v1/models",
         "key_file": "/etc/socks-monitor/.cerebras_key",
         "supports_tools": False,
-        "proxy": True,
+        "proxy": USE_PROXY,
     },
     "nvidia": {
         "url": "https://integrate.api.nvidia.com/v1/chat/completions",
@@ -125,7 +126,7 @@ def load_key(provider_name):
 
 
 def make_opener(use_proxy):
-    if use_proxy:
+    if use_proxy and PROXY_URL:
         return urllib.request.build_opener(
             urllib.request.ProxyHandler({"https": PROXY_URL, "http": PROXY_URL}))
     return urllib.request.build_opener()
