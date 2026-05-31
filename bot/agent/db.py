@@ -247,25 +247,22 @@ class DB:
             log.error(f"DB pick_default_stt_model: {e}")
         return None, None
     @staticmethod
-    def save_profile(uid, profile):
-        # Persist beginner/pro profile without touching the rest of the session state.
-        # Insert a row if the user has none yet so the column survives across restarts.
-        profile = profile if profile in ("beginner", "pro") else "beginner"
+    def pick_default_video_detector_model():
+        """Pick the fastest available synthetic-video detector."""
         try:
-            def op():
-                with DB.connectDb() as conn:
-                    conn.execute(
-                        """
-                        INSERT INTO sessions (user_id, model, history_json, provider, tools_enabled, engine_mode, profile)
-                        VALUES (?, '', '[]', ?, 1, 'native', ?)
-                        ON CONFLICT(user_id) DO UPDATE SET profile=excluded.profile
-                        """,
-                        (uid, PROVIDER_DEFAULT, profile),
-                    )
-                    conn.commit()
-            DB.withRetry(op, "save_profile")
+            with DB.connectDb() as conn:
+                row = conn.execute(
+                    "SELECT provider, model_id FROM model_health "
+                    "WHERE provider='nvidia' AND category='video' AND available=1 "
+                    "AND (capabilities LIKE '%video:detect%' OR model_id LIKE '%detector%' OR model_id LIKE '%detection%') "
+                    "ORDER BY latency_ms ASC LIMIT 1"
+                ).fetchone()
+                if row:
+                    return row[0], row[1]
         except Exception as e:
-            log.error(f"DB save_profile: {e}")
+            log.error(f"DB pick_default_video_detector_model: {e}")
+        return None, None
+
     @staticmethod
     def get_healthy_models(provider, category="text", limit=10):
         try:
