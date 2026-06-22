@@ -55,18 +55,16 @@ jobs:
       - name: Install, migrate, restart
         uses: appleboy/ssh-action@v1.2.5
         env:
-          BOT_PROXY_URL: ${{ secrets.BOT_PROXY_URL }}
           BOT_PROXY_DISABLED: ${{ secrets.BOT_PROXY_DISABLED }}
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          MODEL_LEADERBOARD_TOKEN: ${{ secrets.MODEL_LEADERBOARD_TOKEN }}
           BOT_BENCHMARK_DISABLED: ${{ secrets.BOT_BENCHMARK_DISABLED }}
+          VAULT_DEPLOY_TOKEN: ${{ secrets.VAULT_DEPLOY_TOKEN }}
         with:
           host: ${{ secrets.VDS_HOST }}
           port: ${{ secrets.VDS_PORT }}
           username: ${{ secrets.VDS_USER }}
           key: ${{ secrets.VDS_SSH_KEY }}
           passphrase: ${{ secrets.VDS_SSH_PASSPHRASE }}
-          envs: BOT_PROXY_URL,BOT_PROXY_DISABLED,HF_TOKEN,MODEL_LEADERBOARD_TOKEN,BOT_BENCHMARK_DISABLED
+          envs: BOT_PROXY_DISABLED,BOT_BENCHMARK_DISABLED,VAULT_DEPLOY_TOKEN
           script: |
             set -e
             APP_DIR=/opt/smolevich-ai-bot
@@ -106,14 +104,35 @@ jobs:
 
             rm -rf /tmp/deploy-bot
 
-            # Centralized .env (mirror voice-ai). Keeps existing /etc/socks-monitor/.<provider>_key
-            # files intact — vds-agent.py still uses them as fallback.
+            # Pull all runtime secrets from Vault (mirror voice-ai). Single rotation point:
+            # update a field in Vault (secret/smolevich-ai-bot) + redeploy, no gh-secret edit.
+            # Vault listens localhost-only on the server, so this runs from the SSH session.
+            export VAULT_ADDR=http://127.0.0.1:8200
+            if [ -z "$VAULT_DEPLOY_TOKEN" ]; then echo "ERROR: VAULT_DEPLOY_TOKEN not set" >&2; exit 1; fi
+            export VAULT_TOKEN="$VAULT_DEPLOY_TOKEN"
+            V_OPENROUTER=$(vault kv get -field=OPENROUTER_API_KEY secret/smolevich-ai-bot)
+            V_GROQ=$(vault kv get -field=GROQ_API_KEY secret/smolevich-ai-bot)
+            V_CEREBRAS=$(vault kv get -field=CEREBRAS_API_KEY secret/smolevich-ai-bot)
+            V_NVIDIA=$(vault kv get -field=NVIDIA_API_KEY secret/smolevich-ai-bot)
+            V_HF=$(vault kv get -field=HF_TOKEN secret/smolevich-ai-bot)
+            V_LEADERBOARD=$(vault kv get -field=MODEL_LEADERBOARD_TOKEN secret/smolevich-ai-bot)
+            V_PROXY=$(vault kv get -field=PROXY_URL secret/smolevich-ai-bot 2>/dev/null || true)
+            for v in V_OPENROUTER V_GROQ V_CEREBRAS V_NVIDIA V_HF V_LEADERBOARD; do
+              if [ -z "${!v}" ]; then echo "ERROR: $v empty from Vault" >&2; exit 1; fi
+            done
+
+            # Centralized .env — all secrets from Vault. Used by vds-agent (systemd) and the
+            # benchmark cron (which sources this file).
             sudo install -m 0600 /dev/null "$APP_DIR/.env"
             cat << EOF | sudo tee "$APP_DIR/.env" > /dev/null
-            BOT_PROXY_URL=$BOT_PROXY_URL
+            BOT_PROXY_URL=$V_PROXY
             BOT_PROXY_DISABLED=$BOT_PROXY_DISABLED
-            HF_TOKEN=$HF_TOKEN
-            MODEL_LEADERBOARD_TOKEN=$MODEL_LEADERBOARD_TOKEN
+            OPENROUTER_API_KEY=$V_OPENROUTER
+            GROQ_API_KEY=$V_GROQ
+            CEREBRAS_API_KEY=$V_CEREBRAS
+            NVIDIA_API_KEY=$V_NVIDIA
+            HF_TOKEN=$V_HF
+            MODEL_LEADERBOARD_TOKEN=$V_LEADERBOARD
             BOT_BENCHMARK_DISABLED=$BOT_BENCHMARK_DISABLED
             BOT_ACPX_LOCK_PATH=/var/lock/acpx.lock
             BOT_ACPX_LOCK_WAIT=30
@@ -124,11 +143,13 @@ jobs:
             BOT_BENCHMARK_ROOT=/var/lib/vds-agent/sessions/benchmarks
             EOF
 
-            # Keep HF_TOKEN as a separate read-only key for vds-agent's load_provider_key fallback.
-            if [ -n "$HF_TOKEN" ]; then
-              sudo install -m 0600 /dev/null /etc/socks-monitor/.hf_key
-              echo "$HF_TOKEN" | sudo tee /etc/socks-monitor/.hf_key >/dev/null
-            fi
+            # Provider key files from Vault — fallback for the health/audio/media cron probes,
+            # which run the binaries directly and do NOT source .env.
+            for pair in "openrouter:$V_OPENROUTER" "groq:$V_GROQ" "cerebras:$V_CEREBRAS" "nvidia:$V_NVIDIA" "hf:$V_HF"; do
+              name=${pair%%:*}; val=${pair#*:}
+              sudo install -m 0600 /dev/null /etc/socks-monitor/.${name}_key
+              printf '%s' "$val" | sudo tee /etc/socks-monitor/.${name}_key >/dev/null
+            done
 
             sudo systemctl daemon-reload
             sudo yoyo break-lock --database "sqlite:////var/lib/telegram-llm-bot.db?timeout=60" || true
