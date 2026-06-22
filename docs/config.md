@@ -2,6 +2,8 @@
 
 All bot settings come from env vars (see `.env.example`). API keys are resolved in this order: env var → on-disk file.
 
+Runtime secrets (provider keys, `HF_TOKEN`, `MODEL_LEADERBOARD_TOKEN`, proxy URL) are stored in Vault at `secret/smolevich-ai-bot` and written by the deploy into both `/opt/smolevich-ai-bot/.env` and the `/etc/socks-monitor/.<provider>_key` files. See [vault.md](vault.md).
+
 ## VDS paths
 
 - Config: `/etc/socks-monitor/config.json`

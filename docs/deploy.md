@@ -32,8 +32,12 @@ After copying, the workflow runs `systemctl daemon-reload`, `migrate_bot_db`, re
 Required GitHub secrets:
 - `VDS_HOST`, `VDS_PORT`, `VDS_USER`, `VDS_SSH_KEY`, `VDS_SSH_PASSPHRASE` (SSH).
 - `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET` (Tailscale OAuth, scope `tag:gha-runner`).
-- `BOT_PROXY_URL`, `BOT_PROXY_DISABLED`, `HF_TOKEN`, `MODEL_LEADERBOARD_TOKEN` (env file).
-- `BOT_BENCHMARK_DISABLED` (optional kill switch — leave empty to enable benchmark).
+- `VAULT_DEPLOY_TOKEN` (read-only Vault token; CI pulls runtime secrets with it — see [vault.md](vault.md)).
+- `BOT_PROXY_DISABLED`, `BOT_BENCHMARK_DISABLED` (optional flags/kill switches — leave empty to enable).
+
+Runtime secrets (provider keys, `HF_TOKEN`, `MODEL_LEADERBOARD_TOKEN`, `PROXY_URL`) are **not** GitHub
+secrets anymore — they live in Vault at `secret/smolevich-ai-bot` and the deploy reads them with
+`VAULT_DEPLOY_TOKEN`. Rotate = update the field in Vault + redeploy. See [vault.md](vault.md).
 
 ### Confirm deploy in GitHub Actions
 
