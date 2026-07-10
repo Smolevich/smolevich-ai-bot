@@ -1,7 +1,7 @@
 """Cross-process lock that serializes acpx/podman runs on the VDS.
 
 The lock file at `ACPX_LOCK_PATH` is shared between the user-facing claude
-flow in `vds-agent.py` and the benchmark worker in `model-benchmark.py`. Only
+flow in `smolevich-ai-bot.py` and the benchmark worker in `model-benchmark.py`. Only
 one acpx container is allowed to run at a time — two heavy podman processes
 would push a small VDS into swap.
 """
@@ -74,7 +74,7 @@ def acpx_lock(timeout: float, holder: str = "") -> Iterator[bool]:
 
 
 def touch_active(path: str = "") -> None:
-    """Mark vds-agent as currently busy so benchmark can defer its tick."""
+    """Mark smolevich-ai-bot as currently busy so benchmark can defer its tick."""
     target = path or ACPX_ACTIVE_PATH
     try:
         parent = os.path.dirname(target) or "."

@@ -3,7 +3,7 @@
 ## SSH host
 
 - **Alias:** `hetzner-bot` (configured locally in `~/.ssh/config`).
-- **Systemd unit:** `vds-agent` (`vds-agent.service`).
+- **Systemd unit:** `smolevich-ai-bot` (`smolevich-ai-bot.service`).
 
 ## Automatic (full)
 
@@ -11,7 +11,7 @@ Push to `main` touching `bot/**` triggers `.github/workflows/deploy.yml` (`apple
 
 | Local | Server | Perm |
 | --- | --- | --- |
-| `bot/vds-agent.py` | `/usr/local/bin/vds-agent` | `0755` |
+| `bot/smolevich-ai-bot.py` | `/usr/local/bin/smolevich-ai-bot` | `0755` |
 | `bot/migrate.py` | `/usr/local/bin/migrate_bot_db` | `0755` |
 | `bot/model-health-check.py` | `/usr/local/bin/model-health-check` | `0755` |
 | `bot/model-audio-check.py` | `/usr/local/bin/model-audio-check` | `0755` |
@@ -21,13 +21,13 @@ Push to `main` touching `bot/**` triggers `.github/workflows/deploy.yml` (`apple
 | `bot/benchmark-tasks.json` | `/etc/socks-monitor/benchmark-tasks.json` | `0644` |
 | `bot/benchmark-tasks.md` | `/etc/socks-monitor/benchmark-tasks.md` | `0644` |
 | `bot/benchmark-datasets/*.json` | `/etc/socks-monitor/benchmark-datasets/` | `0644` |
-| `bot/vds-agent.service` | `/etc/systemd/system/vds-agent.service` | `0644` |
+| `bot/smolevich-ai-bot.service` | `/etc/systemd/system/smolevich-ai-bot.service` | `0644` |
 | `bot/cron.d/model-checks` | `/etc/cron.d/model-checks` | `0644` |
 | `bot/migrations/*.py` | `/usr/local/bin/migrations/` | `0644` |
 | `bot/agent/*.py` | `/usr/local/bin/agent/` | `0644` |
 | (assembled in workflow) | `/opt/smolevich-ai-bot/.env` (0600 root) | — |
 
-After copying, the workflow runs `systemctl daemon-reload`, `migrate_bot_db`, rebuilds the Podman image if `Containerfile.acpx-claude` changed, then `systemctl restart vds-agent` and verifies it is `active`.
+After copying, the workflow runs `systemctl daemon-reload`, `migrate_bot_db`, rebuilds the Podman image if `Containerfile.acpx-claude` changed, then `systemctl restart smolevich-ai-bot` and verifies it is `active`.
 
 Required GitHub secrets:
 - `VDS_HOST`, `VDS_PORT`, `VDS_USER`, `VDS_SSH_KEY`, `VDS_SSH_PASSPHRASE` (SSH).
@@ -56,7 +56,7 @@ Deploy is complete only when workflow `Deploy to VDS` shows `completed/success`.
 ./deploy.sh
 ```
 
-Ships `bot/vds-agent.py` only and restarts the systemd unit. Use the GitHub workflow if you also need to push migrations / cron scripts / the systemd unit.
+Ships `bot/smolevich-ai-bot.py` only and restarts the systemd unit. Use the GitHub workflow if you also need to push migrations / cron scripts / the systemd unit.
 
 ## Cron jobs (deployed via CI)
 
@@ -80,7 +80,7 @@ ssh hetzner-bot 'sudo /usr/local/bin/model-audio-check'
 ssh hetzner-bot 'sudo /usr/local/bin/model-media-check'
 
 # Daily leaderboard benchmark (native + claude)
-ssh hetzner-bot 'sudo nohup /bin/sh -c "set -a; . /opt/smolevich-ai-bot/.env 2>/dev/null || true; . /etc/socks-monitor/vds-agent.env 2>/dev/null || true; set +a; [ \"\$BOT_BENCHMARK_DISABLED\" = \"1\" ] && exit 0; /usr/local/bin/model-benchmark run --max-jobs 200; if [ -n \"\$MODEL_LEADERBOARD_TOKEN\" ]; then /usr/local/bin/model-benchmark leaderboard --publish; /usr/local/bin/model-benchmark leaderboard --publish-tasks; fi; /usr/local/bin/model-benchmark purge" >> /var/log/model-benchmark.log 2>&1 &'
+ssh hetzner-bot 'sudo nohup /bin/sh -c "set -a; . /opt/smolevich-ai-bot/.env 2>/dev/null || true; . /etc/socks-monitor/smolevich-ai-bot.env 2>/dev/null || true; set +a; [ \"\$BOT_BENCHMARK_DISABLED\" = \"1\" ] && exit 0; /usr/local/bin/model-benchmark run --max-jobs 200; if [ -n \"\$MODEL_LEADERBOARD_TOKEN\" ]; then /usr/local/bin/model-benchmark leaderboard --publish; /usr/local/bin/model-benchmark leaderboard --publish-tasks; fi; /usr/local/bin/model-benchmark purge" >> /var/log/model-benchmark.log 2>&1 &'
 ```
 
 ## Server one-time prerequisites
@@ -88,7 +88,7 @@ ssh hetzner-bot 'sudo nohup /bin/sh -c "set -a; . /opt/smolevich-ai-bot/.env 2>/
 Run before the first benchmark cron tick on a fresh box:
 
 ```sh
-# 1. Enable 2 GiB swap — without it an OOM kills vds-agent.
+# 1. Enable 2 GiB swap — without it an OOM kills smolevich-ai-bot.
 sudo fallocate -l 2G /swapfile
 sudo chmod 600 /swapfile
 sudo mkswap /swapfile
@@ -108,16 +108,16 @@ sudo tee /etc/logrotate.d/model-checks <<'EOF'
 EOF
 
 # 3. Old session cleanup (runs daily at 04:00).
-echo '0 4 * * * root find /var/lib/vds-agent/sessions -mindepth 1 -maxdepth 1 -type d -mtime +14 -exec rm -rf {} +' \
-  | sudo tee /etc/cron.d/vds-agent-session-cleanup
+echo '0 4 * * * root find /var/lib/smolevich-ai-bot/sessions -mindepth 1 -maxdepth 1 -type d -mtime +14 -exec rm -rf {} +' \
+  | sudo tee /etc/cron.d/smolevich-ai-bot-sessions-cleanup
 ```
 
 ## Verify
 
 ```sh
 gh run list --limit 5
-ssh hetzner-bot 'systemctl is-active vds-agent'
-ssh hetzner-bot 'sudo journalctl -u vds-agent -n 100 --no-pager'
+ssh hetzner-bot 'systemctl is-active smolevich-ai-bot'
+ssh hetzner-bot 'sudo journalctl -u smolevich-ai-bot -n 100 --no-pager'
 ssh hetzner-bot 'tail -n 50 /var/log/model-health-check.log'
 ssh hetzner-bot 'tail -n 50 /var/log/model-audio-check.log'
 ssh hetzner-bot 'tail -n 50 /var/log/model-media-check.log'
@@ -131,8 +131,8 @@ ssh hetzner-bot 'tail -n 50 /var/log/model-benchmark.log'
 Server-side checks:
 
 ```sh
-ssh hetzner-bot 'systemctl restart vds-agent'
-ssh hetzner-bot 'sudo journalctl -u vds-agent -n 80 --no-pager'
+ssh hetzner-bot 'systemctl restart smolevich-ai-bot'
+ssh hetzner-bot 'sudo journalctl -u smolevich-ai-bot -n 80 --no-pager'
 ```
 
 Client-side refresh (if `/stt`/`/tts` still not visible):

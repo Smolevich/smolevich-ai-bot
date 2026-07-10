@@ -6,7 +6,7 @@ Pipeline (cron driven, once per day):
 
 Native tasks run as plain HTTP completions in parallel. Claude tasks run in a
 podman sandbox via acpx; only one acpx container is allowed on the host at a
-time (global flock shared with vds-agent.py). Workspaces are removed after
+time (global flock shared with smolevich-ai-bot.py). Workspaces are removed after
 scoring unless the run failed and BOT_BENCHMARK_KEEP_FAILED=1.
 """
 from __future__ import annotations
@@ -691,7 +691,7 @@ def run_claimed(args: argparse.Namespace, jobs: list[dict[str, Any]], workers: i
 
 def work_mode(args: argparse.Namespace, mode: str, limit: int, worker_id: str) -> list[dict[str, Any]]:
     if mode == "claude" and active_recent(ACTIVE_SKIP_WINDOW_SEC):
-        log.info("vds-agent recently active, deferring claude tick")
+        log.info("smolevich-ai-bot recently active, deferring claude tick")
         return []
     jobs = claim_jobs(args, mode, limit, worker_id)
     if not jobs:

@@ -5,7 +5,7 @@ SESSION=""
 PROVIDER="openrouter"
 TASK=""
 MODEL=""
-WORKDIR="/var/lib/vds-agent/sessions"
+WORKDIR="/var/lib/smolevich-ai-bot/sessions"
 PROXY_FILE="/etc/socks-monitor/.proxy_url"
 if [[ -n "${BOT_PROXY_DISABLED:-}" ]]; then
   PROXY_URL=""

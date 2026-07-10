@@ -7,12 +7,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REMOTE="hetzner-bot"
-REMOTE_PATH="/usr/local/bin/vds-agent"
+REMOTE_PATH="/usr/local/bin/smolevich-ai-bot"
 
-echo "Deploying bot/vds-agent.py -> ${REMOTE}:${REMOTE_PATH}"
-scp "${SCRIPT_DIR}/bot/vds-agent.py" "${REMOTE}:${REMOTE_PATH}"
+echo "Deploying bot/smolevich-ai-bot.py -> ${REMOTE}:${REMOTE_PATH}"
+scp "${SCRIPT_DIR}/bot/smolevich-ai-bot.py" "${REMOTE}:${REMOTE_PATH}"
 echo "Deploying bot/agent/ -> ${REMOTE}:/usr/local/bin/agent/"
 ssh "${REMOTE}" "sudo mkdir -p /usr/local/bin/agent && sudo chown \$USER /usr/local/bin/agent"
 scp -r "${SCRIPT_DIR}/bot/agent/"* "${REMOTE}:/usr/local/bin/agent/"
-ssh "${REMOTE}" "sudo systemctl restart vds-agent && sleep 1 && sudo systemctl is-active vds-agent"
+ssh "${REMOTE}" "sudo systemctl restart smolevich-ai-bot && sleep 1 && sudo systemctl is-active smolevich-ai-bot"
 echo "Done."

@@ -17,7 +17,7 @@ A Telegram bot that gives you one chat interface in front of several LLM provide
 
 ## How it runs
 
-A single Python file (`bot/vds-agent.py`, stdlib only) on a VDS as the `vds-agent` systemd unit. Configuration is via env vars (see [`.env.example`](.env.example)); API keys are read from env or from per-provider files under `/etc/socks-monitor/`.
+A single Python file (`bot/smolevich-ai-bot.py`, stdlib only) on a VDS as the `smolevich-ai-bot` systemd unit. Configuration is via env vars (see [`.env.example`](.env.example)); API keys are read from env or from per-provider files under `/etc/socks-monitor/`.
 
 CI (`.github/workflows/deploy.yml`) ships the bot, migrations, migration runner, health-check scripts, and the systemd unit on every push to `main` that touches `bot/**`. `deploy.sh` is a manual fallback that updates only the bot binary.
 

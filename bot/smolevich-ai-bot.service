@@ -1,13 +1,13 @@
 [Unit]
-Description=VDS Secure AI Agent
+Description=Smolevich AI Bot
 After=network.target
 
 [Service]
-ExecStart=/usr/bin/python3 /usr/local/bin/vds-agent
+ExecStart=/usr/bin/python3 /usr/local/bin/smolevich-ai-bot
 Restart=always
 User=root
 Environment=PYTHONUNBUFFERED=1
-EnvironmentFile=-/etc/socks-monitor/vds-agent.env
+EnvironmentFile=-/etc/socks-monitor/smolevich-ai-bot.env
 EnvironmentFile=-/opt/smolevich-ai-bot/.env
 
 [Install]

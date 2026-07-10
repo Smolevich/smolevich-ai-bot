@@ -2,9 +2,9 @@
 
 Everything bot-related lives in `bot/`:
 
-- `bot/vds-agent.py` — the bot itself (~1250+ lines): Telegram long-poll/webhook, SQLite, providers (OpenRouter / Groq / Cerebras / NVIDIA / Hugging Face), Podman sessions, STT/TTS handlers. Holds the global acpx lock for user sessions.
+- `bot/smolevich-ai-bot.py` — the bot itself (~1250+ lines): Telegram long-poll/webhook, SQLite, providers (OpenRouter / Groq / Cerebras / NVIDIA / Hugging Face), Podman sessions, STT/TTS handlers. Holds the global acpx lock for user sessions.
 - `bot/agent/` — shared typed modules used by runtime: `config.py`, `text.py`, `db.py`, `entities.py`, `provider_api.py`, `telegram_api.py`, plus `acpx_lock.py` (cross-process flock between bot and benchmark) and `benchmark_scoring.py` (auto-scorers for GSM8K).
-- `bot/vds-agent.service` — systemd unit, two EnvironmentFiles (`/etc/socks-monitor/vds-agent.env` + `/opt/smolevich-ai-bot/.env`).
+- `bot/smolevich-ai-bot.service` — systemd unit, two EnvironmentFiles (`/etc/socks-monitor/smolevich-ai-bot.env` + `/opt/smolevich-ai-bot/.env`).
 - `bot/migrate.py` — yoyo migration runner (deploys to server as `migrate_bot_db`).
 - `bot/model-health-check.py` — text/code model health cron job, writes provider/model availability into the bot DB.
 - `bot/model-audio-check.py` — separate audio (STT/TTS) health cron job.

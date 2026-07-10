@@ -17,7 +17,7 @@ model-benchmark purge
 
 1. **Selection** — for each provider, pick the three most stable text models from the last 7 days in `model_health_log` (`success_rate ≥ 0.9`, `checks ≥ 6`, mean latency ≤ 8 s).
 2. **Native run** — all three are graded on the native chat task.
-3. **Claude run** — the top-1 model per provider additionally runs a claude tool-use task inside the same Podman sandbox the bot uses for user chats. Sequential, gated by the global `acpx` flock (`/var/lock/acpx.lock`). If a user chat is active within the last 120 s (`/run/vds-agent-active`), the claude tick is deferred.
+3. **Claude run** — the top-1 model per provider additionally runs a claude tool-use task inside the same Podman sandbox the bot uses for user chats. Sequential, gated by the global `acpx` flock (`/var/lock/acpx.lock`). If a user chat is active within the last 120 s (`/run/smolevich-ai-bot-active`), the claude tick is deferred.
 4. **Scoring** — auto-scorers in `bot/agent/benchmark_scoring.py`. No LLM judge.
 5. **Publish** — results pushed to the leaderboard endpoint; methodology + tasks list pushed to the tasks endpoint.
 6. **Purge** — jobs older than 7 days and results older than 30 days are removed.
@@ -135,7 +135,7 @@ First picks if/when we extend: MMLU-Pro (best discrimination), MATH-500 (reuses 
 ## Concurrency & locking
 
 - **`/var/lock/acpx.lock`** — shared flock between the bot's claude chat handler and the benchmark's claude task. Only one acpx/podman container runs at a time. `BOT_ACPX_LOCK_WAIT` controls how long a user chat waits before responding "agent busy" (default 30 s).
-- **`/run/vds-agent-active`** — touched by `ask_via_acpx` whenever a user chat is active. The benchmark skips its claude tick if this file was touched within `ACTIVE_SKIP_WINDOW_SEC` (120 s).
+- **`/run/smolevich-ai-bot-active`** — touched by `ask_via_acpx` whenever a user chat is active. The benchmark skips its claude tick if this file was touched within `ACTIVE_SKIP_WINDOW_SEC` (120 s).
 
 ## Endpoints
 
@@ -153,7 +153,7 @@ Written to `/opt/smolevich-ai-bot/.env` by `deploy.yml`:
 - `BOT_BENCHMARK_TASKS` — path to `benchmark-tasks.json` (default `/etc/socks-monitor/benchmark-tasks.json`).
 - `BOT_BENCHMARK_METHODOLOGY` — path to `benchmark-tasks.md` (default `/etc/socks-monitor/benchmark-tasks.md`).
 - `BOT_BENCHMARK_DATASETS` — directory with dataset samples (default `/etc/socks-monitor/benchmark-datasets`).
-- `BOT_BENCHMARK_ROOT` — workspaces for claude benchmark runs (default `/var/lib/vds-agent/sessions/benchmarks`); auto-cleaned on success.
+- `BOT_BENCHMARK_ROOT` — workspaces for claude benchmark runs (default `/var/lib/smolevich-ai-bot/sessions/benchmarks`); auto-cleaned on success.
 - `BOT_BENCHMARK_KEEP_FAILED=1` — keep failed claude workspaces around for debugging.
 
 ## DB tables
@@ -166,7 +166,7 @@ The leaderboard aggregator reads both tables plus `model_health_log` to compute 
 ## Manual run
 
 ```sh
-ssh hetzner-bot 'sudo nohup /bin/sh -c "set -a; . /opt/smolevich-ai-bot/.env 2>/dev/null || true; . /etc/socks-monitor/vds-agent.env 2>/dev/null || true; set +a; [ \"\$BOT_BENCHMARK_DISABLED\" = \"1\" ] && exit 0; /usr/local/bin/model-benchmark run --max-jobs 200; if [ -n \"\$MODEL_LEADERBOARD_TOKEN\" ]; then /usr/local/bin/model-benchmark leaderboard --publish; /usr/local/bin/model-benchmark leaderboard --publish-tasks; fi; /usr/local/bin/model-benchmark purge" >> /var/log/model-benchmark.log 2>&1 &'
+ssh hetzner-bot 'sudo nohup /bin/sh -c "set -a; . /opt/smolevich-ai-bot/.env 2>/dev/null || true; . /etc/socks-monitor/smolevich-ai-bot.env 2>/dev/null || true; set +a; [ \"\$BOT_BENCHMARK_DISABLED\" = \"1\" ] && exit 0; /usr/local/bin/model-benchmark run --max-jobs 200; if [ -n \"\$MODEL_LEADERBOARD_TOKEN\" ]; then /usr/local/bin/model-benchmark leaderboard --publish; /usr/local/bin/model-benchmark leaderboard --publish-tasks; fi; /usr/local/bin/model-benchmark purge" >> /var/log/model-benchmark.log 2>&1 &'
 ```
 
 Log: `/var/log/model-benchmark.log`.

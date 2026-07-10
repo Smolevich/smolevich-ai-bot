@@ -1,2 +1,2 @@
-"""Shared helpers/config for vds-agent runtime."""
+"""Shared helpers/config for smolevich-ai-bot runtime."""
 

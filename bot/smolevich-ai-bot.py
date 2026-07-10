@@ -1886,7 +1886,7 @@ def process_update(upd, token, admin_id):
             hist = compact_history(prov["url"], api_key, model, hist, uid, admin_id, use_proxy=use_proxy)
 
         role_desc = "You are an ADMIN with full internet access." if uid == admin_id else "You are a USER. Internet restricted."
-        sys_prompt = f"VDS Agent. Instructions: {role_desc} Environment: Alpine Linux. No 'requests' lib, use 'urllib.request', wget, curl. Use DuckDuckGo (html.duckduckgo.com) if Google fails. Output: Telegram Markdown V2 — use *bold*, _italic_, `inline code`, triple backticks for code blocks, [text](url) for links. Keep formatting simple and valid for Telegram markdown. Be concise — show actual command output, no hypothetical examples, no tables with status, no 'next steps' sections. Just execute and show results. When user sends coordinates [Геолокация: lat, lon], use them for location-based queries (search nearby places, weather, etc.). Always complete your answer fully — never cut off mid-sentence."
+        sys_prompt = f"Smolevich AI Bot. Instructions: {role_desc} Environment: Alpine Linux. No 'requests' lib, use 'urllib.request', wget, curl. Use DuckDuckGo (html.duckduckgo.com) if Google fails. Output: Telegram Markdown V2 — use *bold*, _italic_, `inline code`, triple backticks for code blocks, [text](url) for links. Keep formatting simple and valid for Telegram markdown. Be concise — show actual command output, no hypothetical examples, no tables with status, no 'next steps' sections. Just execute and show results. When user sends coordinates [Геолокация: lat, lon], use them for location-based queries (search nearby places, weather, etc.). Always complete your answer fully — never cut off mid-sentence."
 
         mode = sess.get("engine_mode", "native")
         from agent.telegram_api import tg_send_chat_action
@@ -1997,7 +1997,7 @@ if __name__ == "__main__":
     if t:
         DB.ensure_schema()
         avail = available_providers()
-        log.info(f"VDS Agent starting on port 8080. Providers: {avail}. Webhook: {TUNNEL_URL}/{t[:5]}...")
+        log.info(f"smolevich-ai-bot starting on port 8080. Providers: {avail}. Webhook: {TUNNEL_URL}/{t[:5]}...")
         set_bot_commands(t)
         urllib.request.urlopen(urllib.request.Request(f"https://api.telegram.org/bot{t}/setWebhook", f"--B\r\nContent-Disposition: form-data; name=\"url\"\r\n\r\n{TUNNEL_URL}/{t}\r\n--B--\r\n".encode(), {"Content-Type": "multipart/form-data; boundary=B"}))
         ThreadingHTTPServer(("127.0.0.1", 8080), WebhookHandler).serve_forever()

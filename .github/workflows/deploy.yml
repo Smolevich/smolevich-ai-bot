@@ -21,7 +21,7 @@ jobs:
 
       - name: Syntax preflight
         run: |
-          python3 -m py_compile bot/vds-agent.py bot/migrate.py \
+          python3 -m py_compile bot/smolevich-ai-bot.py bot/migrate.py \
             bot/model-health-check.py bot/model-audio-check.py bot/model-media-check.py \
             bot/model-benchmark.py bot/scripts/refresh-benchmark-datasets.py \
             bot/agent/*.py
@@ -30,8 +30,8 @@ jobs:
         run: |
           SHA=$(git rev-parse --short HEAD)
           DATE=$(date -u +"%Y-%m-%d")
-          sed -i "s|^__VERSION__ = \"dev\"|__VERSION__ = \"$DATE-$SHA\"|" bot/vds-agent.py
-          grep -E '^__VERSION__' bot/vds-agent.py
+          sed -i "s|^__VERSION__ = \"dev\"|__VERSION__ = \"$DATE-$SHA\"|" bot/smolevich-ai-bot.py
+          grep -E '^__VERSION__' bot/smolevich-ai-bot.py
 
       - name: Connect to Tailscale
         uses: tailscale/github-action@v2
@@ -48,7 +48,7 @@ jobs:
           username: ${{ secrets.VDS_USER }}
           key: ${{ secrets.VDS_SSH_KEY }}
           passphrase: ${{ secrets.VDS_SSH_PASSPHRASE }}
-          source: bot/vds-agent.py,bot/migrate.py,bot/model-health-check.py,bot/model-audio-check.py,bot/model-media-check.py,bot/model-benchmark.py,bot/benchmark-tasks.json,bot/benchmark-tasks.md,bot/benchmark-datasets,bot/scripts,bot/vds-agent.service,bot/migrations,bot/agent,bot/Containerfile.acpx-claude,bot/cron.d
+          source: bot/smolevich-ai-bot.py,bot/migrate.py,bot/model-health-check.py,bot/model-audio-check.py,bot/model-media-check.py,bot/model-benchmark.py,bot/benchmark-tasks.json,bot/benchmark-tasks.md,bot/benchmark-datasets,bot/scripts,bot/smolevich-ai-bot.service,bot/migrations,bot/agent,bot/Containerfile.acpx-claude,bot/cron.d
           target: /tmp/deploy-bot
           strip_components: 1
 
@@ -70,14 +70,14 @@ jobs:
             APP_DIR=/opt/smolevich-ai-bot
             sudo mkdir -p "$APP_DIR"
 
-            sudo install -m 0755 /tmp/deploy-bot/vds-agent.py             /usr/local/bin/vds-agent
+            sudo install -m 0755 /tmp/deploy-bot/smolevich-ai-bot.py             /usr/local/bin/smolevich-ai-bot
             sudo install -m 0755 /tmp/deploy-bot/migrate.py               /usr/local/bin/migrate_bot_db
             sudo install -m 0755 /tmp/deploy-bot/model-health-check.py    /usr/local/bin/model-health-check
             sudo install -m 0755 /tmp/deploy-bot/model-audio-check.py     /usr/local/bin/model-audio-check
             sudo install -m 0755 /tmp/deploy-bot/model-media-check.py     /usr/local/bin/model-media-check
             sudo install -m 0755 /tmp/deploy-bot/model-benchmark.py       /usr/local/bin/model-benchmark
             sudo install -m 0755 /tmp/deploy-bot/scripts/refresh-benchmark-datasets.py /usr/local/bin/refresh-benchmark-datasets
-            sudo install -m 0644 /tmp/deploy-bot/vds-agent.service        /etc/systemd/system/vds-agent.service
+            sudo install -m 0644 /tmp/deploy-bot/smolevich-ai-bot.service        /etc/systemd/system/smolevich-ai-bot.service
             sudo install -m 0644 /tmp/deploy-bot/Containerfile.acpx-claude /usr/local/bin/Containerfile.acpx-claude
             sudo install -m 0644 /tmp/deploy-bot/benchmark-tasks.json     /etc/socks-monitor/benchmark-tasks.json
             sudo install -m 0644 /tmp/deploy-bot/benchmark-tasks.md       /etc/socks-monitor/benchmark-tasks.md
@@ -121,7 +121,7 @@ jobs:
               if [ -z "${!v}" ]; then echo "ERROR: $v empty from Vault" >&2; exit 1; fi
             done
 
-            # Centralized .env — all secrets from Vault. Used by vds-agent (systemd) and the
+            # Centralized .env — all secrets from Vault. Used by smolevich-ai-bot (systemd) and the
             # benchmark cron (which sources this file).
             sudo install -m 0600 /dev/null "$APP_DIR/.env"
             cat << EOF | sudo tee "$APP_DIR/.env" > /dev/null
@@ -136,11 +136,11 @@ jobs:
             BOT_BENCHMARK_DISABLED=$BOT_BENCHMARK_DISABLED
             BOT_ACPX_LOCK_PATH=/var/lock/acpx.lock
             BOT_ACPX_LOCK_WAIT=30
-            BOT_ACPX_ACTIVE_PATH=/run/vds-agent-active
+            BOT_ACPX_ACTIVE_PATH=/run/smolevich-ai-bot-active
             BOT_BENCHMARK_TASKS=/etc/socks-monitor/benchmark-tasks.json
             BOT_BENCHMARK_METHODOLOGY=/etc/socks-monitor/benchmark-tasks.md
             BOT_BENCHMARK_DATASETS=/etc/socks-monitor/benchmark-datasets
-            BOT_BENCHMARK_ROOT=/var/lib/vds-agent/sessions/benchmarks
+            BOT_BENCHMARK_ROOT=/var/lib/smolevich-ai-bot/sessions/benchmarks
             EOF
 
             # Provider key files from Vault — fallback for the health/audio/media cron probes,
@@ -151,9 +151,25 @@ jobs:
               printf '%s' "$val" | sudo tee /etc/socks-monitor/.${name}_key >/dev/null
             done
 
+            # One-time migration off the legacy vds-agent naming; no-op once renamed.
+            if [ -f /etc/systemd/system/vds-agent.service ]; then
+              sudo systemctl disable --now vds-agent || true
+              sudo mkdir -p /etc/systemd/system/smolevich-ai-bot.service.d
+              sudo cp /etc/systemd/system/vds-agent.service.d/*.conf /etc/systemd/system/smolevich-ai-bot.service.d/ 2>/dev/null || true
+              sudo rm -rf /etc/systemd/system/vds-agent.service /etc/systemd/system/vds-agent.service.d
+              sudo rm -f /usr/local/bin/vds-agent /run/vds-agent-active
+            fi
+            if [ -d /var/lib/vds-agent ]; then sudo mv /var/lib/vds-agent /var/lib/smolevich-ai-bot; fi
+            if [ -f /etc/socks-monitor/vds-agent.env ]; then sudo mv /etc/socks-monitor/vds-agent.env /etc/socks-monitor/smolevich-ai-bot.env; fi
+            if [ -f /etc/cron.d/vds-sessions-cleanup ]; then
+              sudo rm -f /etc/cron.d/vds-sessions-cleanup
+              echo '0 3 * * * root find /var/lib/smolevich-ai-bot/sessions -mindepth 1 -maxdepth 1 -type d -mtime +14 -exec rm -rf {} +' | sudo tee /etc/cron.d/smolevich-ai-bot-sessions-cleanup >/dev/null
+            fi
+
             sudo systemctl daemon-reload
             sudo yoyo break-lock --database "sqlite:////var/lib/telegram-llm-bot.db?timeout=60" || true
             sudo /usr/local/bin/migrate_bot_db
-            sudo systemctl restart vds-agent
+            sudo systemctl enable smolevich-ai-bot
+            sudo systemctl restart smolevich-ai-bot
             sleep 1
-            sudo systemctl is-active vds-agent
+            sudo systemctl is-active smolevich-ai-bot

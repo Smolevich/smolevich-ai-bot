@@ -1,10 +1,10 @@
 # smolevich-ai-bot
 
-Telegram bot using free-tier LLM providers with a Podman sandbox. Runs on a VDS as the `vds-agent` systemd unit. Stdlib-only Python — no external runtime deps.
+Telegram bot using free-tier LLM providers with a Podman sandbox. Runs on a VDS as the `smolevich-ai-bot` systemd unit. Stdlib-only Python — no external runtime deps.
 
 ## Where things live
 
-- `bot/vds-agent.py` — Telegram polling/webhook entrypoint shim.
+- `bot/smolevich-ai-bot.py` — Telegram polling/webhook entrypoint shim.
 - `bot/agent/` — typed runtime modules (`config.py`, `text.py`, `db.py`, `entities.py`, `provider_api.py`, `telegram_api.py`, `acpx_lock.py`, `benchmark_scoring.py`).
 - `bot/model-{health,audio,media}-check.py` — provider/model probes (cron).
 - `bot/model-benchmark.py` — free-models benchmark (cron, 07:00 and 19:00 UTC).
@@ -23,10 +23,10 @@ The bot and the benchmark share a flock at `/var/lock/acpx.lock` so only one acp
 
 ## VDS
 
-- SSH alias: `hetzner-bot`. Systemd unit: `vds-agent`.
+- SSH alias: `hetzner-bot`. Systemd unit: `smolevich-ai-bot`.
 - Shared SQLite DB: `/var/lib/telegram-llm-bot.db` (tables: `model_health`, `model_health_log`, `model_benchmark_jobs`, `model_benchmark_results`, plus bot state).
-- Per-session workspaces: `/var/lib/vds-agent/sessions`.
-- Env: `/opt/smolevich-ai-bot/.env` (CI-assembled from Vault) + `/etc/socks-monitor/vds-agent.env`. Provider keys: `/etc/socks-monitor/.<provider>_key`.
+- Per-session workspaces: `/var/lib/smolevich-ai-bot/sessions`.
+- Env: `/opt/smolevich-ai-bot/.env` (CI-assembled from Vault) + `/etc/socks-monitor/smolevich-ai-bot.env`. Provider keys: `/etc/socks-monitor/.<provider>_key`.
 - Secrets live in Vault at `secret/smolevich-ai-bot`; deploy reads them via `VAULT_DEPLOY_TOKEN`. See [docs/vault.md](docs/vault.md).
 
 Paths, env vars and the binary mapping: [docs/config.md](docs/config.md).
