@@ -750,6 +750,42 @@ def print_summary(results: list[dict[str, Any]]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def compute_overall(health_rate: float, bench_score: float) -> float:
+    """Single ranking number. Availability leads — see WEIGHT_HEALTH."""
+    return health_rate * WEIGHT_HEALTH + bench_score * WEIGHT_BENCH
+
+
+def is_provisional(total_runs: int) -> bool:
+    """True while a model has too few runs for its score to mean anything."""
+    return total_runs < MIN_RUNS_TO_RANK
+
+
+def rank_status(health_rate: float, bench_score: float, provisional: bool) -> str:
+    if health_rate < 0.75:
+        return "unstable"
+    if provisional:
+        return "provisional"
+    if bench_score < 0.4:
+        return "unstable"
+    return "available"
+
+
+def leaderboard_sort_key(item: dict[str, Any]) -> tuple[int, float, int, int]:
+    """Sort key for the published board, used with reverse=True.
+
+    Provisional models rank below every measured one regardless of score.
+    `overall` is rounded to two decimals so positions do not swap on
+    thousandths, and run count breaks ties so the better-measured model wins.
+    Latency deliberately plays no part.
+    """
+    return (
+        0 if item.get("provisional") else 1,
+        round(item.get("score", 0.0), 2),
+        int(item.get("runs", 0)),
+        int(item.get("last_bench", 0)),
+    )
+
+
 def infer_strengths(
     model_id: str,
     native_score: float,
@@ -965,16 +1001,9 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
             bench_score = 0.0
 
         total_runs = native_runs + claude_runs
-        overall = health_rate * WEIGHT_HEALTH + bench_score * WEIGHT_BENCH
-        provisional = total_runs < MIN_RUNS_TO_RANK
-
-        status = "available"
-        if health_rate < 0.75:
-            status = "unstable"
-        elif provisional:
-            status = "provisional"
-        elif bench_score < 0.4:
-            status = "unstable"
+        overall = compute_overall(health_rate, bench_score)
+        provisional = is_provisional(total_runs)
+        status = rank_status(health_rate, bench_score, provisional)
 
         if provisional:
             notes = f"Not enough data to rank yet: {total_runs} run(s)."
@@ -1018,18 +1047,7 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
                 },
             }
         )
-    # Provisional models always sort below ranked ones, whatever their score:
-    # a high number off two runs is noise, not a result. Run count breaks ties
-    # so better-measured models win, and latency never affects position.
-    ranked.sort(
-        key=lambda item: (
-            0 if item["provisional"] else 1,
-            round(item["score"], 2),
-            item["runs"],
-            item["last_bench"],
-        ),
-        reverse=True,
-    )
+    ranked.sort(key=leaderboard_sort_key, reverse=True)
     seen_providers: set[str] = set()
     top_per_provider: list[dict[str, Any]] = []
     for item in ranked:
