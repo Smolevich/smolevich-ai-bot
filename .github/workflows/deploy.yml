@@ -113,6 +113,11 @@ jobs:
             export VAULT_ADDR=http://127.0.0.1:8200
             if [ -z "$VAULT_DEPLOY_TOKEN" ]; then echo "ERROR: VAULT_DEPLOY_TOKEN not set" >&2; exit 1; fi
             export VAULT_TOKEN="$VAULT_DEPLOY_TOKEN"
+            # Periodic token: renew on every deploy so it never expires as long as we
+            # ship within its period (~32d). Without this the token silently died after
+            # three weeks without a deploy and the next one failed with "invalid token".
+            # Non-fatal — a non-renewable token still works until its TTL runs out.
+            vault token renew -self >/dev/null 2>&1 || echo "WARN: vault token self-renew failed (non-fatal)"
             V_OPENROUTER=$(vault kv get -field=OPENROUTER_API_KEY secret/smolevich-ai-bot)
             V_GROQ=$(vault kv get -field=GROQ_API_KEY secret/smolevich-ai-bot)
             V_CEREBRAS=$(vault kv get -field=CEREBRAS_API_KEY secret/smolevich-ai-bot)
