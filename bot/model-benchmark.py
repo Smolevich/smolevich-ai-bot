@@ -51,9 +51,24 @@ DEFAULT_MAX_JOBS = 200
 DEFAULT_TIMEOUT = 60
 DEFAULT_CLAUDE_TIMEOUT = 120
 DEFAULT_LOOKBACK_BENCH_HOURS = 168
-HALF_LIFE_BENCH_SEC = 12 * 3600
-HALF_LIFE_HEALTH_SEC = 12 * 3600
+# Half-lives are deliberately long. Bench scores come from a handful of samples
+# per run, so a 12h half-life let a single flipped answer reshuffle the whole
+# board; 48h averages over enough runs to be worth publishing.
+HALF_LIFE_BENCH_SEC = 48 * 3600
+HALF_LIFE_HEALTH_SEC = 48 * 3600
 MAX_RESPONSE_EXCERPT = 4000
+
+# A model needs this many finished bench runs before it gets a rank. Below the
+# threshold it is still published, but flagged `provisional` and sorted after
+# every ranked model — otherwise a 2-run model outranks an 8-run one on noise.
+MIN_RUNS_TO_RANK = 4
+# Ranking weights. Health dominates on purpose: availability is measured
+# millions of times, bench score a few times per run.
+WEIGHT_HEALTH = 0.6
+WEIGHT_BENCH = 0.4
+# Latency is reported but never scored — on free tiers it tracks somebody
+# else's load, not model quality.
+FAST_LATENCY_MS = 1500
 
 ACTIVE_SKIP_WINDOW_SEC = 120
 LEADERBOARD_ENDPOINT = "https://notes-share.smolevich90.workers.dev/api/smolevich-ai-bot/free-models"
@@ -735,24 +750,34 @@ def print_summary(results: list[dict[str, Any]]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def infer_strengths(model_id: str, native_score: float, claude_score: float, latency_ms: int) -> list[str]:
+def infer_strengths(
+    model_id: str,
+    native_score: float,
+    claude_score: float,
+    latency_ms: int,
+    total_runs: int = 0,
+) -> list[str]:
+    """Tags shown next to a model. Only claims backed by data get a tag.
+
+    Quality tags stay off until the model has enough runs — a "Stable chat"
+    badge earned on two samples is worse than no badge. "Russian/English" used
+    to be appended to every model unconditionally, which made it noise; it is
+    gone until there is a language check to back it.
+    """
     mid = model_id.lower()
     strengths: list[str] = []
-    if native_score >= 0.8:
+    measured = total_runs >= MIN_RUNS_TO_RANK
+    if measured and native_score >= 0.8:
         strengths.append("Stable chat")
-    if claude_score >= 0.7:
+    if measured and claude_score >= 0.7:
         strengths.append("Agent mode")
-    if latency_ms and latency_ms < 2500:
+    if latency_ms and latency_ms < FAST_LATENCY_MS:
         strengths.append("Fast")
-    if any(k in mid for k in ("coder", "code", "qwen", "deepseek", "devstral", "codestral")):
+    if any(k in mid for k in ("coder", "code", "devstral", "codestral")):
         strengths.append("Code")
-    if any(k in mid for k in ("70b", "120b", "405b", "large", "nemotron", "reason")):
+    if any(k in mid for k in ("70b", "120b", "405b", "nemotron", "reason")):
         strengths.append("Reasoning")
-    if "Russian/English" not in strengths:
-        if len(strengths) >= 5:
-            strengths = strengths[:4]
-        strengths.append("Russian/English")
-    return strengths[:5]
+    return strengths[:4]
 
 
 def context_window_hint(model_id: str) -> str:
@@ -939,20 +964,27 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
         else:
             bench_score = 0.0
 
-        latency_bonus = max(0.0, min(0.1, (6000 - latency_ms) / 60000.0)) if latency_ms else 0.0
-        overall = health_rate * 0.45 + bench_score * 0.45 + latency_bonus
+        total_runs = native_runs + claude_runs
+        overall = health_rate * WEIGHT_HEALTH + bench_score * WEIGHT_BENCH
+        provisional = total_runs < MIN_RUNS_TO_RANK
 
         status = "available"
         if health_rate < 0.75:
             status = "unstable"
-        elif (native_runs + claude_runs) and bench_score < 0.6:
+        elif provisional:
+            status = "provisional"
+        elif bench_score < 0.4:
             status = "unstable"
 
-        notes = "Reliable in recent health checks."
-        if (native_runs + claude_runs):
-            notes = f"Pass rate: native {native_score:.0%}"
-            if claude_runs:
-                notes += f", claude {claude_score:.0%}."
+        if provisional:
+            notes = f"Not enough data to rank yet: {total_runs} run(s)."
+        else:
+            notes = f"Uptime {health_rate:.0%} over the window"
+            if total_runs:
+                notes += f"; pass rate native {native_score:.0%}"
+                if claude_runs:
+                    notes += f", tool use {claude_score:.0%}"
+                notes += f" across {total_runs} run(s)."
             else:
                 notes += "."
 
@@ -964,16 +996,21 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
                 "score": overall,
                 "latency_ms": latency_ms,
                 "last_bench": last_bench,
+                "provisional": provisional,
+                "runs": total_runs,
                 "task_results": results_by_pm.get(pm, []),
                 "model": {
                     "model": model_id,
                     "provider": PROVIDER_LABELS.get(provider, provider),
-                    "strengths": infer_strengths(model_id, native_score, claude_score, latency_ms),
+                    "strengths": infer_strengths(model_id, native_score, claude_score, latency_ms, total_runs),
                     "contextWindow": context_window_hint(model_id),
                     "status": status,
                     "notes": notes[:240],
+                    "runs": total_runs,
+                    "provisional": provisional,
                     "scores": {
-                        "native": round(native_score, 3),
+                        "uptime": round(health_rate, 3),
+                        "native": round(native_score, 3) if native_runs else None,
                         "claude": round(claude_score, 3) if claude_runs else None,
                         "overall": round(overall, 3),
                     },
@@ -981,7 +1018,18 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
                 },
             }
         )
-    ranked.sort(key=lambda item: (item["score"], -item["latency_ms"], item["last_bench"]), reverse=True)
+    # Provisional models always sort below ranked ones, whatever their score:
+    # a high number off two runs is noise, not a result. Run count breaks ties
+    # so better-measured models win, and latency never affects position.
+    ranked.sort(
+        key=lambda item: (
+            0 if item["provisional"] else 1,
+            round(item["score"], 2),
+            item["runs"],
+            item["last_bench"],
+        ),
+        reverse=True,
+    )
     seen_providers: set[str] = set()
     top_per_provider: list[dict[str, Any]] = []
     for item in ranked:
