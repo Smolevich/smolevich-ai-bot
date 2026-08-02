@@ -26,6 +26,9 @@ jobs:
             bot/model-benchmark.py bot/scripts/refresh-benchmark-datasets.py \
             bot/agent/*.py
 
+      - name: Unit tests
+        run: python3 -m unittest discover -s tests -v
+
       - name: Stamp version
         run: |
           SHA=$(git rev-parse --short HEAD)

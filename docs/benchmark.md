@@ -65,15 +65,31 @@ Score:
 For each model:
 
 ```
-overall       = 0.45 * health_rate + 0.45 * bench_score + latency_bonus
-bench_score   = 0.65 * native_score + 0.35 * claude_score   (claude_score = 0 if not run)
-latency_bonus = max(0, min(0.1, (6000 - latency_ms) / 60000))
+overall     = 0.6 * health_rate + 0.4 * bench_score
+bench_score = 0.65 * native_score + 0.35 * claude_score   (native only, if claude never ran)
 ```
 
-- All component scores are **EWMA-weighted** over a 48-hour window (half-life 12 h for both bench and health samples — `HALF_LIFE_BENCH_SEC`, `HALF_LIFE_HEALTH_SEC` in `bot/model-benchmark.py`).
-- `health_rate` is the EWMA-weighted availability rate from `model_health_log` over the same window.
-- `latency_bonus` is capped at ±0.1 — purely cosmetic; reliability and quality dominate.
-- Models receive `status: "unstable"` if `health_rate < 0.75` or `bench_score < 0.6`.
+**Availability leads on purpose.** `health_rate` comes from millions of probes in
+`model_health_log`; `bench_score` comes from a handful of samples per run. Weighting
+them equally let the noisier signal drive the board.
+
+- A model needs **at least `MIN_RUNS_TO_RANK` (4) finished runs** to receive a rank.
+  Below that it is published with `provisional: true` and sorted after every ranked
+  model, whatever its raw score. Without this a 2-run model outranked an 8-run one
+  purely on small-sample noise.
+- **Latency is reported, never scored.** On free tiers it tracks other tenants' load,
+  not model quality. The old `latency_bonus` term is gone.
+- Component scores are **EWMA-weighted**, half-life **48 h** for both bench and health
+  samples (`HALF_LIFE_BENCH_SEC`, `HALF_LIFE_HEALTH_SEC`). The previous 12 h half-life
+  let a single flipped answer reshuffle the board between runs.
+- Sorting rounds `overall` to 2 decimals before comparing, so positions do not swap on
+  thousandths; ties break by run count, so the better-measured model wins.
+- `status` is `unstable` when `health_rate < 0.75` or `bench_score < 0.4`, and
+  `provisional` when the run threshold is not met.
+
+Models that never ran the claude tool-use task are **not** penalised — `bench_score`
+falls back to `native_score` alone. (An earlier revision of this document claimed
+`claude_score = 0` in that case; the code never did that.)
 
 ## Datasets
 
