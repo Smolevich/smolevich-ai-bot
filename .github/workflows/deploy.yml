@@ -117,17 +117,47 @@ jobs:
             # ship within its period (~32d). Without this the token silently died after
             # three weeks without a deploy and the next one failed with "invalid token".
             # Non-fatal — a non-renewable token still works until its TTL runs out.
-            vault token renew >/dev/null 2>&1 || echo "WARN: vault token renew failed (non-fatal)"
-            V_OPENROUTER=$(vault kv get -field=OPENROUTER_API_KEY secret/smolevich-ai-bot)
-            V_GROQ=$(vault kv get -field=GROQ_API_KEY secret/smolevich-ai-bot)
-            V_CEREBRAS=$(vault kv get -field=CEREBRAS_API_KEY secret/smolevich-ai-bot)
-            V_NVIDIA=$(vault kv get -field=NVIDIA_API_KEY secret/smolevich-ai-bot)
-            V_HF=$(vault kv get -field=HF_TOKEN secret/smolevich-ai-bot)
-            V_LEADERBOARD=$(vault kv get -field=MODEL_LEADERBOARD_TOKEN secret/smolevich-ai-bot)
-            V_PROXY=$(vault kv get -field=PROXY_URL secret/smolevich-ai-bot 2>/dev/null || true)
+            # Флаг — ФАЙЛОМ, а не переменной: vv() зовётся внутри $( ), то есть в
+            # подоболочке, и присваивание до родителя не доезжает.
+            DEGRADED_FLAG=$(mktemp -u)
+            vault token renew >/dev/null 2>&1 \
+              || { echo "WARN: vault token renew failed"; : > "$DEGRADED_FLAG"; }
+
+            # Провал чтения = берём значение из уже лежащего .env, а не роняем
+            # деплой: секреты на сервере рабочие, ронять выкатку кода незачем.
+            prev_env() { sudo grep -m1 -oP "^$1=\\K.*" "$APP_DIR/.env" 2>/dev/null || true; }
+            vv() {  # $1 = имя в .env, $2 = поле в Vault
+              local got
+              got=$(vault kv get -field="$2" secret/smolevich-ai-bot 2>/dev/null || true)
+              if [ -n "$got" ]; then printf '%s' "$got"; return; fi
+              : > "$DEGRADED_FLAG"
+              printf '%s' "$(prev_env "$1")"
+            }
+            V_OPENROUTER=$(vv OPENROUTER_API_KEY OPENROUTER_API_KEY)
+            V_GROQ=$(vv GROQ_API_KEY GROQ_API_KEY)
+            V_CEREBRAS=$(vv CEREBRAS_API_KEY CEREBRAS_API_KEY)
+            V_NVIDIA=$(vv NVIDIA_API_KEY NVIDIA_API_KEY)
+            V_HF=$(vv HF_TOKEN HF_TOKEN)
+            V_LEADERBOARD=$(vv MODEL_LEADERBOARD_TOKEN MODEL_LEADERBOARD_TOKEN)
+            V_PROXY=$(vv BOT_PROXY_URL PROXY_URL)
             for v in V_OPENROUTER V_GROQ V_CEREBRAS V_NVIDIA V_HF V_LEADERBOARD; do
-              if [ -z "${!v}" ]; then echo "ERROR: $v empty from Vault" >&2; exit 1; fi
+              if [ -z "${!v}" ]; then echo "ERROR: $v пуст и в Vault, и в .env" >&2; exit 1; fi
             done
+
+            # Жить на копии из .env бесконечно нельзя: ротация молча не применяется.
+            DEGRADED_MARK="$APP_DIR/.vault-degraded-since"
+            if [ -f "$DEGRADED_FLAG" ]; then
+              rm -f "$DEGRADED_FLAG"
+              sudo test -f "$DEGRADED_MARK" || date +%s | sudo tee "$DEGRADED_MARK" >/dev/null
+              DAYS=$(( ( $(date +%s) - $(sudo cat "$DEGRADED_MARK") ) / 86400 ))
+              if [ "$DAYS" -ge 7 ]; then
+                echo "ERROR: Vault недоступен уже $DAYS дн., ротация не применяется." >&2
+                exit 1
+              fi
+              echo "::warning::Vault недоступен $DAYS дн. Секреты из .env. Через $(( 7 - DAYS )) дн. деплой начнёт падать."
+            else
+              sudo rm -f "$DEGRADED_MARK"
+            fi
 
             # Centralized .env — all secrets from Vault. Used by smolevich-ai-bot (systemd) and the
             # benchmark cron (which sources this file).
