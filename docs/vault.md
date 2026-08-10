@@ -9,7 +9,6 @@ Runtime secrets live in HashiCorp Vault, **KV v2**, as a single secret at
 | `GROQ_API_KEY` | `.env` + `.groq_key` | bot, probes, benchmark |
 | `CEREBRAS_API_KEY` | `.env` + `.cerebras_key` | bot, probes, benchmark |
 | `NVIDIA_API_KEY` | `.env` + `.nvidia_key` | bot, probes, benchmark |
-| `HF_TOKEN` | `.env` + `.hf_key` | bot, probes, benchmark |
 | `MODEL_LEADERBOARD_TOKEN` | `.env` | benchmark `--publish` |
 | `PROXY_URL` | `.env` `BOT_PROXY_URL` | bot, probes |
 

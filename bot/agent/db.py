@@ -155,6 +155,11 @@ class DB:
                 res = conn.execute("SELECT model, history_json, provider, tools_enabled, engine_mode, COALESCE(last_session_id, ''), COALESCE(profile, 'beginner'), COALESCE(ui_lang, 'ru') FROM sessions WHERE user_id = ?", (uid,)).fetchone()
                 if res:
                     prov = res[2] or PROVIDER_DEFAULT
+                    model = sanitize_model_id(res[0])
+                    # A retired provider can still sit in an old session row; its model dies with it.
+                    if prov not in PROVIDERS:
+                        prov = PROVIDER_DEFAULT
+                        model = DB.pick_default_text_model(prov) or PROVIDERS[prov]["default_model"]
                     tools_enabled = (res[3] if len(res) > 3 else None)
                     if tools_enabled is None:
                         tools_enabled = 1 if PROVIDERS.get(prov, {}).get("supports_tools", True) else 0
@@ -162,7 +167,7 @@ class DB:
                     last_session_id = (res[5] if len(res) > 5 else None) or ""
                     profile = (res[6] if len(res) > 6 else None) or "beginner"
                     ui_lang = (res[7] if len(res) > 7 else None) or "ru"
-                    return {"model": sanitize_model_id(res[0]), "history": json.loads(res[1]), "provider": prov, "tools_enabled": tools_enabled == 1, "engine_mode": engine_mode, "last_session_id": last_session_id, "profile": profile, "ui_lang": ui_lang}
+                    return {"model": model, "history": json.loads(res[1]), "provider": prov, "tools_enabled": tools_enabled == 1, "engine_mode": engine_mode, "last_session_id": last_session_id, "profile": profile, "ui_lang": ui_lang}
                 # Brand-new session — pick historically best healthy text model; fall back to fastest healthy; then to static default.
                 chosen = DB.pick_default_text_model(PROVIDER_DEFAULT)
                 return {"model": chosen, "history": [], "provider": PROVIDER_DEFAULT, "tools_enabled": True, "engine_mode": "native", "last_session_id": "", "profile": "beginner", "ui_lang": "ru"}

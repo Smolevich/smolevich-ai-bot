@@ -79,7 +79,6 @@ PROVIDER_LABELS = {
     "groq": "Groq",
     "cerebras": "Cerebras",
     "nvidia": "NVIDIA",
-    "huggingface": "Hugging Face",
 }
 
 DEFAULT_TASKS_PATH = os.environ.get(

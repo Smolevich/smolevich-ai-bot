@@ -55,12 +55,6 @@ PROVIDERS = {
         "supports_tools": True,
         "proxy": False,
     },
-    "huggingface": {
-        "models_url": "https://router.huggingface.co/v1/models",
-        "key_file": "/etc/socks-monitor/.hf_key",
-        "supports_tools": True,
-        "proxy": False,
-    },
 }
 
 logging.basicConfig(

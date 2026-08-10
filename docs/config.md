@@ -2,13 +2,13 @@
 
 All bot settings come from env vars (see `.env.example`). API keys are resolved in this order: env var → on-disk file.
 
-Runtime secrets (provider keys, `HF_TOKEN`, `MODEL_LEADERBOARD_TOKEN`, proxy URL) are stored in Vault at `secret/smolevich-ai-bot` and written by the deploy into both `/opt/smolevich-ai-bot/.env` and the `/etc/socks-monitor/.<provider>_key` files. See [vault.md](vault.md).
+Runtime secrets (provider keys, `MODEL_LEADERBOARD_TOKEN`, proxy URL) are stored in Vault at `secret/smolevich-ai-bot` and written by the deploy into both `/opt/smolevich-ai-bot/.env` and the `/etc/socks-monitor/.<provider>_key` files. See [vault.md](vault.md).
 
 ## VDS paths
 
 - Config: `/etc/socks-monitor/config.json`
 - Admin ID: `/etc/socks-monitor/.admin_id`
-- Provider keys: `/etc/socks-monitor/.<provider>_key` (openrouter, groq, cerebras, nvidia, hf)
+- Provider keys: `/etc/socks-monitor/.<provider>_key` (openrouter, groq, cerebras, nvidia)
 - DB: `/var/lib/telegram-llm-bot.db` — shared between the bot, all health-check crons, and the benchmark.
 - Sandbox sessions: `/var/lib/smolevich-ai-bot/sessions`
 - Migrations dir on server: `/usr/local/bin/migrations/`
@@ -16,6 +16,8 @@ Runtime secrets (provider keys, `HF_TOKEN`, `MODEL_LEADERBOARD_TOKEN`, proxy URL
 - Audio-check log: `/var/log/model-audio-check.log`
 - Media-check log: `/var/log/model-media-check.log`
 - Benchmark log: `/var/log/model-benchmark.log`
+
+All four probe logs rotate daily (or at 50 MB) via `/etc/logrotate.d/model-checks`, 7 generations kept.
 
 Each bot path can be overridden via the matching `BOT_*` env var.
 

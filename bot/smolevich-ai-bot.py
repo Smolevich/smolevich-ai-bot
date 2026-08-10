@@ -235,6 +235,8 @@ def build_models_view(sess, category="text", limit=12):
     db_category = "text"
     # For /models we must be deterministic and fast: use only DB cache, never provider network fetches.
     ms = DB.get_recent_models(prov, max_age_sec=1800, category=db_category, limit=max(limit * 3, 30))
+    # Offering a model the last probe called dead only buys the user an error.
+    ms = [m for m in ms if m.get("available", True)]
     if not ms:
         ms = DB.get_healthy_models(prov, category=db_category, limit=max(limit * 3, 30))
     ms = ms[:limit]
@@ -285,6 +287,7 @@ def build_menu_root(sess, is_admin=False):
         kb.append(voice_row)
     if has_video_detector():
         kb.append([{"text": "🕵️ VideoDetect", "callback_data": "menu:video"}])
+    kb.append([{"text": ("🏆 Top models" if is_en else "🏆 Топ моделей"), "callback_data": "menu:top"}])
     if is_admin:
         kb.append([{"text": "🛠 Admin", "callback_data": "menu:admin"}])
     kb.append(
@@ -333,7 +336,6 @@ def build_admin_menu(sess):
         [{"text": f"⚙️ Engine: {mode}", "callback_data": "menu:mode"}],
         [{"text": f"🧰 Tools: {'on' if tools_on else 'off'}", "callback_data": "menu:tools"}],
         [{"text": "📈 Status", "callback_data": "menu:status"}],
-        [{"text": "🏆 Top models", "callback_data": "menu:top"}],
         [{"text": "👥 Users", "callback_data": "menu:users"}],
         [{"text": "🐛 Debug", "callback_data": "menu:debug"}],
         [{"text": "← Назад", "callback_data": "menu:back"}],
@@ -1182,7 +1184,7 @@ def send_status_text(token, uid):
         rl_text = ", ".join([f"{k}={v}" for k, v in sorted(rl.items())])
     elif provider in ("groq", "cerebras"):
         rl_text = "n/a (send one request with this provider to populate headers)"
-    elif provider in ("nvidia", "huggingface"):
+    elif provider == "nvidia":
         rl_text = "n/a (provider typically does not expose quota headers)"
     txt = (
         "📌 Текущий статус\n"
@@ -1265,6 +1267,10 @@ def handle_callback(cb, token, admin_id):
     log.info(f"Callback from {uid}: {data}")
     if data.startswith("set_provider:"):
         prov_name = data.split(":", 1)[1]; sess = DB.get_session(uid)
+        # An old keyboard may still offer a provider we have since dropped.
+        if prov_name not in PROVIDERS:
+            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": f"❌ Provider {prov_name} is no longer available.", "show_alert": True})
+            return
         default_model = DB.pick_default_text_model(prov_name) or PROVIDERS[prov_name]["default_model"]
         default_tools = PROVIDERS[prov_name].get("supports_tools", True)
         DB.save_session(uid, default_model, sess["history"], provider=prov_name, tools_enabled=default_tools, engine_mode=sess.get("engine_mode", "native"))
@@ -1484,9 +1490,6 @@ def handle_callback(cb, token, admin_id):
             tg_request(token, "sendMessage", {"chat_id": uid, "text": "📝 Чтобы отправить отзыв админу, напиши:\n/feedback <текст сообщения>"})
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Инструкция отправлена"})
         elif action == "top":
-            if uid != admin_id:
-                tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Недоступно", "show_alert": True})
-                return
             tg_send_text(token, uid, build_top_text())
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Топ отправлен"})
         elif action == "mode":

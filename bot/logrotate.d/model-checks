@@ -1,0 +1,18 @@
+# Logs of the cron probes from bot/cron.d/model-checks.
+# Deployed by CI to /etc/logrotate.d/model-checks.
+# copytruncate: a probe can run up to 9 minutes and keeps the log open across a rotation.
+
+/var/log/model-health-check.log
+/var/log/model-audio-check.log
+/var/log/model-media-check.log
+/var/log/model-benchmark.log {
+    daily
+    maxsize 50M
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    su root root
+}

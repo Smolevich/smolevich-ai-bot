@@ -15,6 +15,7 @@ Everything bot-related lives in `bot/`:
 - `bot/benchmark-datasets/` — fixed JSON samples from public HF datasets (currently GSM8K test, 15 random rows).
 - `bot/scripts/refresh-benchmark-datasets.py` — pulls fresh samples from `datasets-server.huggingface.co` (stdlib only).
 - `bot/cron.d/model-checks` — cron entries deployed to `/etc/cron.d/model-checks`. Includes the benchmark pipeline that runs twice daily at 07:00 and 19:00 UTC.
+- `bot/logrotate.d/model-checks` — rotation for the four probe logs, deployed to `/etc/logrotate.d/model-checks`.
 - `bot/migrations/` — yoyo migrations against SQLite (`/var/lib/telegram-llm-bot.db`).
 - `bot/Containerfile.acpx-claude` — Podman image (`acpx-claude:latest`) used by both the user sandbox and the benchmark; built on the host when its hash changes.
 - `bot/opx.sh` — opencode wrapper used by the bot's `/run` command (dev tool).
