@@ -47,6 +47,26 @@ class QuickKeyboard(unittest.TestCase):
         self.assertIn(bot.QUICK_MORE["en"], buttons(keyboard(SESSION_EN)))
 
 
+class ChatIsAlwaysReachable(unittest.TestCase):
+    def test_chat_button_is_always_there(self):
+        self.assertIn(bot.QUICK_CHAT["ru"], buttons(keyboard(SESSION_RU, stt=False, tts=False)))
+
+    def test_chat_leaves_the_voice_mode(self):
+        with bot.pendingTtsUsersLock:
+            bot.pendingTtsUsers.add(7)
+        with mock.patch.object(bot, "DB") as db, mock.patch.object(bot, "tg_send_text"):
+            db.get_session.return_value = SESSION_RU
+            bot.handle_quick_action("chat", 7, "token", admin_id=0)
+        self.assertFalse(bot.take_pending_tts(7))
+
+
+class MenuRootText(unittest.TestCase):
+    def test_no_explanatory_blurb(self):
+        with mock.patch.object(bot, "has_video_detector", return_value=False):
+            txt, _ = bot.build_menu_root(SESSION_RU, is_admin=False)
+        self.assertEqual(txt, "☰ Ещё")
+
+
 class QuickLabelRouting(unittest.TestCase):
     def test_label_is_recognised_in_both_languages(self):
         self.assertEqual(bot.quick_action_for(bot.QUICK_STT["ru"]), "stt")

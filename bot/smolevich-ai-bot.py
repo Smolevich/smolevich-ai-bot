@@ -270,9 +270,9 @@ def build_models_view(sess, category="text", limit=12):
     txt = f"Текстовые модели ({prov}):"
     return txt, kb
 
+QUICK_CHAT = {"ru": "💬 Спросить", "en": "💬 Ask"}
 QUICK_STT = {"ru": "🎙 Аудио → текст", "en": "🎙 Audio → text"}
 QUICK_TTS = {"ru": "🔊 Текст → аудио", "en": "🔊 Text → audio"}
-QUICK_MODEL = {"ru": "🤖 Модель", "en": "🤖 Model"}
 QUICK_MORE = {"ru": "☰ Ещё", "en": "☰ More"}
 
 
@@ -284,15 +284,20 @@ def build_quick_keyboard(sess):
         voice_row.append({"text": QUICK_STT[lang]})
     if has_tts_models():
         voice_row.append({"text": QUICK_TTS[lang]})
-    kb = [voice_row] if voice_row else []
-    kb.append([{"text": QUICK_MODEL[lang]}, {"text": QUICK_MORE[lang]}])
+    kb = [[{"text": QUICK_CHAT[lang]}]]
+    if voice_row:
+        kb.append(voice_row)
+    kb.append([{"text": QUICK_MORE[lang]}])
     return {"keyboard": kb, "resize_keyboard": True, "is_persistent": True}
 
 
 def quick_action_for(text):
-    """Map a bottom-keyboard label back to an action, in either UI language."""
+    """Map a bottom-keyboard label back to an action, in either UI language.
+
+    Matching is exact: `in`/`startswith` would swallow real questions.
+    """
     t = (text or "").strip()
-    for action, labels in (("stt", QUICK_STT), ("tts", QUICK_TTS), ("model", QUICK_MODEL), ("more", QUICK_MORE)):
+    for action, labels in (("chat", QUICK_CHAT), ("stt", QUICK_STT), ("tts", QUICK_TTS), ("more", QUICK_MORE)):
         if t in labels.values():
             return action
     return ""
@@ -302,18 +307,14 @@ def build_menu_root(sess, is_admin=False):
     """Корневое inline-меню: то, что не влезло в четыре нижние кнопки."""
     ui_lang = sess.get("ui_lang", "ru")
     is_en = ui_lang == "en"
-    kb = [[{"text": ("🏆 Top models" if is_en else "🏆 Топ моделей"), "callback_data": "menu:top"}]]
+    kb = [[{"text": ("🤖 Model" if is_en else "🤖 Модель"), "callback_data": "menu:model"}],
+          [{"text": ("🏆 Top models" if is_en else "🏆 Топ моделей"), "callback_data": "menu:top"}]]
     if has_video_detector():
         kb.append([{"text": ("🕵️ Is the video AI-made?" if is_en else "🕵️ Видео: AI или нет"), "callback_data": "menu:video"}])
     kb.append([{"text": ("⚙️ Settings" if is_en else "⚙️ Настройки"), "callback_data": "menu:settings"}])
     if is_admin:
         kb.append([{"text": "🛠 Admin", "callback_data": "menu:admin"}])
-    txt = (
-        "☰ More\n\nText goes to the model as is — no button needed.\nBottom buttons cover the rest."
-    ) if is_en else (
-        "☰ Ещё\n\nОбычный текст и так уходит в модель — кнопка не нужна.\nОстальное — на кнопках снизу."
-    )
-    return txt, kb
+    return ("☰ More" if is_en else "☰ Ещё"), kb
 
 def build_menu_settings(sess, is_admin=False):
     """Сабменю настроек."""
@@ -1549,23 +1550,27 @@ def handle_quick_action(action, uid, token, admin_id):
     """Bottom-keyboard buttons arrive as plain text, not as callbacks."""
     sess = DB.get_session(uid)
     is_en = sess.get("ui_lang", "ru") == "en"
-    if action == "stt":
+    if action == "chat":
+        # Leaving a voice mode has to be possible, or the next message never reaches the model.
+        with pendingSttUsersLock:
+            pendingSttUsers.discard(uid)
+        with pendingTtsUsersLock:
+            pendingTtsUsers.discard(uid)
+        tg_send_text(token, uid, "💬 Ask anything — I'll answer." if is_en else "💬 Пиши вопрос — отвечу.")
+    elif action == "stt":
         if not has_stt_models():
-            tg_send_text(token, uid, "STT is unavailable right now." if is_en else "STT сейчас недоступен.")
+            tg_send_text(token, uid, "Transcription is unavailable right now." if is_en else "Расшифровка сейчас недоступна.")
             return True
         with pendingSttUsersLock:
             pendingSttUsers.add(uid)
         tg_send_text(token, uid, "🎙 Send a voice message or an audio file." if is_en else "🎙 Пришли голосовое или аудиофайл.")
     elif action == "tts":
         if not has_tts_models():
-            tg_send_text(token, uid, "TTS is unavailable right now." if is_en else "TTS сейчас недоступен.")
+            tg_send_text(token, uid, "Voicing is unavailable right now." if is_en else "Озвучка сейчас недоступна.")
             return True
         with pendingTtsUsersLock:
             pendingTtsUsers.add(uid)
         tg_send_text(token, uid, "🔊 Send the text to voice." if is_en else "🔊 Пришли текст — верну аудио.")
-    elif action == "model":
-        m_txt, m_kb = build_models_view(sess, category="text", limit=12)
-        tg_request(token, "sendMessage", {"chat_id": uid, "text": m_txt, "reply_markup": {"inline_keyboard": m_kb}})
     elif action == "more":
         m_txt, m_kb = build_menu_root(sess, is_admin=(uid == admin_id))
         tg_request(token, "sendMessage", {"chat_id": uid, "text": m_txt, "reply_markup": {"inline_keyboard": m_kb}})
@@ -1581,7 +1586,7 @@ def handle_command(uid, username, text, token, admin_id):
         # A reply keyboard and an inline one cannot share a message, so the bottom row comes first.
         tg_request(token, "sendMessage", {
             "chat_id": uid,
-            "text": ("Pick a button below, or just type." if is_en else "Жми кнопку снизу или просто пиши текстом."),
+            "text": ("💬 Ask anything — I'll answer." if is_en else "💬 Пиши вопрос — отвечу."),
             "reply_markup": build_quick_keyboard(sess),
         })
         m_txt, m_kb = build_menu_root(sess, is_admin=(uid == admin_id))
