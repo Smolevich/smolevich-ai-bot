@@ -1633,12 +1633,13 @@ def handle_command(uid, username, text, token, admin_id):
     elif cmd == "/help":
         tg_request(token, "sendMessage", {"chat_id": uid, "text": build_help_text(sess, is_admin=(uid == admin_id))})
     elif cmd == "/feedback":
+        is_en = sess.get("ui_lang", "ru") == "en"
         body = text.split(maxsplit=1)[1].strip() if len(text.split(maxsplit=1)) > 1 else ""
         if not body:
-            tg_send_text(token, uid, "Напиши так: /feedback и текст сообщения.")
+            tg_send_text(token, uid, "Write it as: /feedback your message." if is_en else "Напиши так: /feedback и текст сообщения.")
             return True
         tg_send_text(token, admin_id, f"📝 Отзыв от {username} ({uid}):\n\n{body}")
-        tg_send_text(token, uid, "Отправил. Спасибо.")
+        tg_send_text(token, uid, "Sent. Thank you." if is_en else "Отправил. Спасибо.")
     else:
         tg_send_text(token, uid, "Slash-команды убраны. Используй /menu для действий и /help для подсказки.")
     return True
@@ -1770,7 +1771,9 @@ def process_update(upd, token, admin_id):
                 # The detector lives outside the session: picking it must not replace the user's LLM.
                 provider, selected_model = pick_video_detector()
                 if not selected_model:
-                    tg_send_text(token, uid, "❌ Детектор видео сейчас недоступен.")
+                    is_en = sess_for_media.get("ui_lang", "ru") == "en"
+                    tg_send_text(token, uid, "❌ Video detection is unavailable right now."
+                                 if is_en else "❌ Проверка видео сейчас недоступна.")
                     return
                 model_info = DB.get_model_info(provider, selected_model)
                 if model_info and not model_info.get("available", False):
@@ -1957,7 +1960,9 @@ def process_update(upd, token, admin_id):
             text = f"[Место: {title}, {addr}, координаты: {lat}, {lon}]"
         elif "photo" in msg or "sticker" in msg:
             # Silence read as "the bot is broken"; there is no image model to route these to.
-            tg_send_text(token, uid, "🖼 Картинки я пока не разбираю. Опиши словами — отвечу.")
+            is_en = DB.get_session(uid).get("ui_lang", "ru") == "en"
+            tg_send_text(token, uid, "🖼 I can't read images yet. Describe it and I'll answer."
+                         if is_en else "🖼 Картинки я пока не разбираю. Опиши словами — отвечу.")
             return
         else:
             return
