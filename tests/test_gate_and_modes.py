@@ -92,6 +92,10 @@ class ProviderHealth(unittest.TestCase):
             txt = bot.build_provider_health_text()
         self.assertIn("Полностью мёртвые: huggingface", txt)
 
+    def test_retired_provider_rows_are_not_reported(self):
+        with mock.patch.object(bot.DB, "get_provider_health", return_value=[]):
+            self.assertEqual(bot.build_provider_health_text(), "Нет данных о провайдерах.")
+
     def test_healthy_fleet_has_no_warning(self):
         rows = [{"provider": "groq", "total": 8, "live": 6, "last_check": 0}]
         with mock.patch.object(bot.DB, "get_provider_health", return_value=rows):
