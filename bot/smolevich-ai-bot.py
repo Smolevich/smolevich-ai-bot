@@ -111,12 +111,26 @@ def tool_get_exchange_rate(from_c, to_c, amount=1):
             return json.dumps({"rate": rate, "result": amount * rate}) if rate else "Unknown"
     except Exception as e: return "Rate unavailable"
 
+BASH_DESC_ADMIN = "Execute bash in Alpine Linux with network access. No 'requests' library, use urllib.request/wget/curl."
+BASH_DESC_USER = "Execute bash in Alpine Linux. NO NETWORK: curl, wget and any download will fail. Local computation only."
+
 TOOLS = [
-    {"type": "function", "function": {"name": "execute_bash", "description": "Execute bash in Alpine Linux. Note: No 'requests' library, use urllib.request/wget/curl. Admin has internet.", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}},
+    {"type": "function", "function": {"name": "execute_bash", "description": BASH_DESC_ADMIN, "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}},
     {"type": "function", "function": {"name": "get_weather", "description": "Get weather", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}},
     {"type": "function", "function": {"name": "get_exchange_rate", "description": "Get rate", "parameters": {"type": "object", "properties": {"from_currency": {"type": "string"}, "to_currency": {"type": "string"}, "amount": {"type": "number", "default": 1}}, "required": ["from_currency", "to_currency"]}}}
 ]
 TOOL_HANDLERS = {"get_weather": lambda a: tool_get_weather(a["city"]), "get_exchange_rate": lambda a: tool_get_exchange_rate(a["from_currency"], a["to_currency"], a.get("amount", 1))}
+
+
+def tools_for(is_admin):
+    """Same tools for everyone, but a plain user's sandbox has no network — say so in the schema."""
+    if is_admin:
+        return TOOLS
+    tools = json.loads(json.dumps(TOOLS))
+    for t in tools:
+        if t["function"]["name"] == "execute_bash":
+            t["function"]["description"] = BASH_DESC_USER
+    return tools
 
 # --- Helpers ---
 
@@ -761,7 +775,7 @@ def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tool
     retry_use_tools = use_tools
     for attempt in range(10):
         payload = {"model": model, "messages": messages, "max_tokens": 4096}
-        if retry_use_tools: payload.update({"tools": TOOLS, "tool_choice": "auto"})
+        if retry_use_tools: payload.update({"tools": tools_for(uid == admin_id), "tool_choice": "auto"})
         req = urllib.request.Request(api_url, json.dumps(payload).encode(), req_headers)
         try:
             t_http = time.time()
@@ -1128,6 +1142,31 @@ def ask_via_acpx(uid, text, sess):
             st.update({"active": False, "last_error_ts": int(time.time())})
             runtimeStatus[uid] = st
         return f"❌ ACP mode exception: {e}", {"prompt_tokens": 0, "completion_tokens": 0}, {"finish_reason": "acpx_exception", "tool_calls_total": 0, "error": str(e)[:200], "session_id": locals().get("session_uuid", "")}
+
+def build_system_prompt(is_admin=False):
+    """The sandbox has no network for plain users, so only an admin may be told about the web."""
+    if is_admin:
+        access = (
+            "You are an ADMIN with full internet access. "
+            "Environment: Alpine Linux. No 'requests' lib, use 'urllib.request', wget, curl. "
+            "Use DuckDuckGo (html.duckduckgo.com) if Google fails. "
+        )
+    else:
+        access = (
+            "You are a USER. The sandbox runs with networking disabled: no web search, no downloads, "
+            "no API calls. Never offer to look something up online — say you cannot and answer from your "
+            "own knowledge. Environment: Alpine Linux, offline. "
+        )
+    return (
+        f"Smolevich AI Bot. Instructions: {access}"
+        "Output: Telegram Markdown V2 — use *bold*, _italic_, `inline code`, triple backticks for code "
+        "blocks, [text](url) for links. Keep formatting simple and valid for Telegram markdown. "
+        "Be concise — show actual command output, no hypothetical examples, no tables with status, "
+        "no 'next steps' sections. Just execute and show results. When user sends coordinates "
+        "[Геолокация: lat, lon], use them for location-based queries (search nearby places, weather, etc.). "
+        "Always complete your answer fully — never cut off mid-sentence."
+    )
+
 
 def build_help_text(sess, is_admin=False):
     is_en = sess.get("ui_lang", "ru") == "en"
@@ -1953,8 +1992,7 @@ def process_update(upd, token, admin_id):
         if estimate_tokens(hist) > MAX_CONTEXT_TOKENS:
             hist = compact_history(prov["url"], api_key, model, hist, uid, admin_id, use_proxy=use_proxy)
 
-        role_desc = "You are an ADMIN with full internet access." if uid == admin_id else "You are a USER. Internet restricted."
-        sys_prompt = f"Smolevich AI Bot. Instructions: {role_desc} Environment: Alpine Linux. No 'requests' lib, use 'urllib.request', wget, curl. Use DuckDuckGo (html.duckduckgo.com) if Google fails. Output: Telegram Markdown V2 — use *bold*, _italic_, `inline code`, triple backticks for code blocks, [text](url) for links. Keep formatting simple and valid for Telegram markdown. Be concise — show actual command output, no hypothetical examples, no tables with status, no 'next steps' sections. Just execute and show results. When user sends coordinates [Геолокация: lat, lon], use them for location-based queries (search nearby places, weather, etc.). Always complete your answer fully — never cut off mid-sentence."
+        sys_prompt = build_system_prompt(is_admin=(uid == admin_id))
 
         mode = sess.get("engine_mode", "native")
         from agent.telegram_api import tg_send_chat_action
