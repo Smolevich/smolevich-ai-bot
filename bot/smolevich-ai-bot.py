@@ -1493,15 +1493,14 @@ def handle_callback(cb, token, admin_id):
         elif action == "image":
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Image-моделей сейчас нет", "show_alert": True})
         elif action == "video":
-            video_provider, video_model = pick_video_detector()
+            _, video_model = pick_video_detector()
             if not video_model:
                 tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "VideoDetect сейчас недоступен", "show_alert": True})
                 return
-            DB.save_session(uid, video_model, sess["history"], provider=video_provider, tools_enabled=sess["tools_enabled"], engine_mode=sess.get("engine_mode", "native"))
             with pendingVideoUsersLock:
                 pendingVideoUsers.add(uid)
-            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": (f"🕵️ VideoDetect enabled.\nModel: {video_model}\nSend video file (you can add text in caption)." if is_en else f"🕵️ VideoDetect включён.\nМодель: {video_model}\nПришли видеофайл (можно с подписью-текстом)."), "reply_markup": {"inline_keyboard": [[{"text": back_label, "callback_data": "menu:back"}]]}})
-            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "VideoDetect"})
+            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": ("🕵️ Send an MP4/WebM file, up to 20 MB — I'll tell whether it looks AI-made." if is_en else "🕵️ Пришли файл MP4/WebM до 20 МБ — скажу, похоже ли на сгенерированное."), "reply_markup": {"inline_keyboard": [[{"text": back_label, "callback_data": "menu:back"}]]}})
+            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "🕵️"})
         elif action == "lang_toggle":
             new_lang = "en" if sess.get("ui_lang", "ru") == "ru" else "ru"
             DB.save_session(uid, sess["model"], sess["history"], provider=sess["provider"], tools_enabled=sess["tools_enabled"], engine_mode=sess.get("engine_mode", "native"), ui_lang=new_lang)
@@ -1531,6 +1530,7 @@ def handle_callback(cb, token, admin_id):
                 tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Недоступно", "show_alert": True})
                 return
             send_status_text(token, uid)
+            tg_send_text(token, uid, build_provider_health_text())
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Статус отправлен"})
         elif action == "help":
             tg_request(token, "sendMessage", {"chat_id": uid, "text": build_help_text(sess, is_admin=(uid == admin_id))})
@@ -1632,9 +1632,37 @@ def handle_command(uid, username, text, token, admin_id):
         tg_request(token, "sendMessage", {"chat_id": uid, "text": m_txt, "reply_markup": {"inline_keyboard": m_kb}})
     elif cmd == "/help":
         tg_request(token, "sendMessage", {"chat_id": uid, "text": build_help_text(sess, is_admin=(uid == admin_id))})
+    elif cmd == "/feedback":
+        body = text.split(maxsplit=1)[1].strip() if len(text.split(maxsplit=1)) > 1 else ""
+        if not body:
+            tg_send_text(token, uid, "Напиши так: /feedback и текст сообщения.")
+            return True
+        tg_send_text(token, admin_id, f"📝 Отзыв от {username} ({uid}):\n\n{body}")
+        tg_send_text(token, uid, "Отправил. Спасибо.")
     else:
         tg_send_text(token, uid, "Slash-команды убраны. Используй /menu для действий и /help для подсказки.")
     return True
+
+
+def build_provider_health_text():
+    """Admin-facing: a provider whose models are all dead reads as 0/N here.
+
+    HuggingFace sat at 0/130 for three months because nothing ever surfaced it.
+    """
+    rows = DB.get_provider_health()
+    if not rows:
+        return "Нет данных о провайдерах."
+    now = int(time.time())
+    lines = ["🩺 Провайдеры (живых/всего)"]
+    for r in rows:
+        icon = "🔴" if not r["live"] else ("🟡" if r["live"] * 4 < r["total"] else "🟢")
+        ago = now - int(r["last_check"] or 0)
+        checked = f"{ago // 60}м назад" if ago < 3600 else f"{ago // 3600}ч назад"
+        lines.append(f"{icon} {r['provider']}: {r['live']}/{r['total']} — проверка {checked}")
+    dead = [r["provider"] for r in rows if not r["live"]]
+    if dead:
+        lines.append(f"\n⚠️ Полностью мёртвые: {', '.join(dead)}. Проверь ключ и биллинг.")
+    return "\n".join(lines)
 
 
 def build_top_text():
@@ -1661,6 +1689,34 @@ def build_top_text():
         )
     return txt
 
+def ensure_access(uid, username, token, admin_id):
+    """True if this person may use the bot; otherwise show the gate and return False."""
+    if uid == admin_id:
+        DB.update_and_check(uid, username)
+        return True
+    if DB.update_and_check(uid, username):
+        return True
+    if is_subscribed(token, uid):
+        DB.set_allowed(uid, True)
+        return True
+    kb = [
+        [{"text": f"📢 Подписаться на {REQUIRED_CHANNEL}", "url": f"https://t.me/{REQUIRED_CHANNEL.lstrip('@')}"}],
+        [{"text": "✅ Я подписался — проверить", "callback_data": "check_sub"}],
+        [{"text": "📝 Запросить доступ без подписки", "callback_data": "request_access"}],
+    ]
+    welcome = (
+        "Привет! Я AI-ассистент.\n\n"
+        "Что умею:\n"
+        "💬 Чат с большими моделями (бесплатные, без VPN)\n"
+        "🎙 Расшифровка голосовых сообщений\n"
+        "🛠 Запуск кода в песочнице\n\n"
+        f"Чтобы начать, подпишись на канал {REQUIRED_CHANNEL} — после этого доступ откроется автоматически. "
+        "Или нажми «Запросить доступ» и я отправлю заявку админу."
+    )
+    tg_request(token, "sendMessage", {"chat_id": uid, "text": welcome, "reply_markup": {"inline_keyboard": kb}})
+    return False
+
+
 def process_update(upd, token, admin_id):
     try:
         upd_id = upd.get("update_id")
@@ -1683,6 +1739,10 @@ def process_update(upd, token, admin_id):
         uid = fi.get("id")
         if uid is None:
             log.warning(f"Skipping message without sender info. Keys: {list(msg.keys())}")
+            return
+        username = fi.get("username") or f"{fi.get('first_name', '')} {fi.get('last_name', '')}".strip()
+        # Access is checked here, above every media branch: voice and video used to slip past it.
+        if not ensure_access(uid, username, token, admin_id):
             return
         # STT path: accept incoming voice/audio/document when either:
         # 1) user explicitly requested /stt, or
@@ -1707,8 +1767,11 @@ def process_update(upd, token, admin_id):
 
         if (has_video_detector and has_video_payload) or (video_pending and has_video_payload):
             try:
-                provider = sess_for_media.get("provider", PROVIDER_DEFAULT)
-                selected_model = sess_for_media.get("model", "")
+                # The detector lives outside the session: picking it must not replace the user's LLM.
+                provider, selected_model = pick_video_detector()
+                if not selected_model:
+                    tg_send_text(token, uid, "❌ Детектор видео сейчас недоступен.")
+                    return
                 model_info = DB.get_model_info(provider, selected_model)
                 if model_info and not model_info.get("available", False):
                     ago = int(time.time()) - int(model_info.get("last_check") or 0)
@@ -1892,9 +1955,12 @@ def process_update(upd, token, admin_id):
             title = venue.get("title", "")
             addr = venue.get("address", "")
             text = f"[Место: {title}, {addr}, координаты: {lat}, {lon}]"
+        elif "photo" in msg or "sticker" in msg:
+            # Silence read as "the bot is broken"; there is no image model to route these to.
+            tg_send_text(token, uid, "🖼 Картинки я пока не разбираю. Опиши словами — отвечу.")
+            return
         else:
             return
-        username = fi.get("username") or f"{fi.get('first_name', '')} {fi.get('last_name', '')}".strip()
         log.info(f"Update from {uid} ({username}): {text}")
 
         lower_text = text.strip().lower()
@@ -1916,28 +1982,6 @@ def process_update(upd, token, admin_id):
             tg_send_text(token, uid, "Ок. Пришлите текст следующим сообщением — переведу на русский без привязки к предыдущей теме.")
             return
 
-        allowed = DB.update_and_check(uid, username)
-        if uid == admin_id: allowed = True
-        if not allowed:
-            if is_subscribed(token, uid): DB.set_allowed(uid, True); allowed = True
-            else:
-                kb = [
-                    [{"text": f"📢 Подписаться на {REQUIRED_CHANNEL}", "url": f"https://t.me/{REQUIRED_CHANNEL.lstrip('@')}"}],
-                    [{"text": "✅ Я подписался — проверить", "callback_data": "check_sub"}],
-                    [{"text": "📝 Запросить доступ без подписки", "callback_data": "request_access"}],
-                ]
-                welcome = (
-                    "Привет! Я AI-ассистент.\n\n"
-                    "Что умею:\n"
-                    "💬 Чат с большими моделями (бесплатные, без VPN)\n"
-                    "🎙 Распознавание голосовых сообщений\n"
-                    "🔊 Озвучка текста в аудио\n"
-                    "🛠 Запуск кода в песочнице\n\n"
-                    f"Чтобы начать, подпишись на канал {REQUIRED_CHANNEL} — после этого доступ откроется автоматически. "
-                    "Или нажми «Запросить доступ» и я отправлю заявку админу."
-                )
-                tg_request(token, "sendMessage", {"chat_id": uid, "text": welcome, "reply_markup": {"inline_keyboard": kb}})
-                return
         if text.startswith("/"): return handle_command(uid, username, text, token, admin_id)
 
         quick = quick_action_for(text)

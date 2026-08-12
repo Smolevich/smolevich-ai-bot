@@ -269,6 +269,20 @@ class DB:
         return None, None
 
     @staticmethod
+    def get_provider_health():
+        """Live/total model counts per provider — a provider at 0 has silently died."""
+        try:
+            with DB.connectDb() as conn:
+                rows = conn.execute(
+                    "SELECT provider, COUNT(*), SUM(available), MAX(last_check) FROM model_health GROUP BY provider "
+                    "ORDER BY provider"
+                ).fetchall()
+                return [{"provider": r[0], "total": r[1], "live": r[2] or 0, "last_check": r[3] or 0} for r in rows]
+        except Exception as e:
+            log.error(f"DB get_provider_health: {e}")
+            return []
+
+    @staticmethod
     def get_healthy_models(provider, category="text", limit=10):
         try:
             with DB.connectDb() as conn:
