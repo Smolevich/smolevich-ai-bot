@@ -912,11 +912,32 @@ def acp_agent_for_mode(mode):
         return m
     return "claude"
 
+
+# claude-code and opencode talk the Anthropic Messages protocol, which only OpenRouter answers
+# among our providers; pi speaks each provider's native API but only knows these three keys.
+HARNESS_PROVIDERS = {
+    "claude": ("openrouter",),
+    "opencode": ("openrouter",),
+    "pi": ("openrouter", "groq", "cerebras"),
+}
+
+
+def harness_target(agent, provider, model):
+    """(provider, model, switched) — a harness run must not go to a provider that cannot answer it."""
+    if provider in HARNESS_PROVIDERS.get(agent, ("openrouter",)):
+        return provider, model, False
+    fallback = "openrouter"
+    picked = DB.pick_default_text_model(fallback) or PROVIDERS[fallback]["default_model"]
+    return fallback, picked, True
+
 def ask_via_acpx(uid, text, sess):
     try:
-        mode_model = sanitize_model_id(sess.get("model") or "")
         mode = sess.get("engine_mode", "native")
         agent = acp_agent_for_mode(mode)
+        harness_provider, harness_model, harness_switched = harness_target(
+            agent, sess.get("provider", PROVIDER_DEFAULT), sanitize_model_id(sess.get("model") or ""))
+        mode_model = harness_model
+        sess = dict(sess, provider=harness_provider, model=harness_model)
         # Each request gets its own isolated workspace subdirectory.
         user_dir = os.path.join(SESSIONS_ROOT, str(uid))
         ensure_dir(user_dir)
@@ -2142,6 +2163,10 @@ def process_update(upd, token, admin_id):
         from agent.telegram_api import tg_send_chat_action
         tg_send_chat_action(token, uid, action="typing")
         if mode in ("claude", "opencode", "pi"):
+            agent_name = acp_agent_for_mode(mode)
+            _p, _m, switched = harness_target(agent_name, provider, model)
+            if switched:
+                tg_send_text(token, uid, f"ℹ️ Режим {agent_name} работает только на {_p} — отвечаю моделью {_m}.")
             ans, usage, meta = ask_via_acpx(uid, text, sess)
         else:
             prompt_messages = [{"role": "system", "content": sys_prompt}] + hist + [{"role": "user", "content": text}]
