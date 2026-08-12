@@ -1324,6 +1324,24 @@ def handle_callback(cb, token, admin_id):
         default_tools = PROVIDERS[prov_name].get("supports_tools", True)
         DB.save_session(uid, default_model, sess["history"], provider=prov_name, tools_enabled=default_tools, engine_mode=sess.get("engine_mode", "native"))
         tg_request(token, "editMessageText", {"chat_id": cb["message"]["chat"]["id"], "message_id": cb["message"]["message_id"], "text": f"✅ Provider: {prov_name}\nModel: {default_model}\nTools: {'on' if default_tools else 'off'}"})
+    elif data.startswith("try:"):
+        # Straight from a leaderboard row: switch provider and model together, stay on the list.
+        _, code, model = data.split(":", 2)
+        prov_name = PROVIDER_BY_CODE.get(code, "")
+        sess = DB.get_session(uid)
+        is_en = sess.get("ui_lang", "ru") == "en"
+        if prov_name not in PROVIDERS:
+            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "❌", "show_alert": True})
+            return
+        model = sanitize_model_id(model)
+        DB.save_session(uid, model, sess["history"], provider=prov_name,
+                        tools_enabled=PROVIDERS[prov_name].get("supports_tools", True),
+                        engine_mode=sess.get("engine_mode", "native"))
+        short = model.split("/")[-1] if "/" in model else model
+        tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"],
+                                                  "text": (f"Answering with {short}" if is_en else f"Отвечаю моделью {short}")})
+        tg_send_text(token, uid, (f"💬 Now answering with {short}. Ask anything."
+                                  if is_en else f"💬 Теперь отвечаю моделью {short}. Спрашивай."))
     elif data.startswith("set_model:"):
         m = sanitize_model_id(data.split(":", 1)[1])
         sess = DB.get_session(uid)
@@ -1539,7 +1557,8 @@ def handle_callback(cb, token, admin_id):
             tg_request(token, "sendMessage", {"chat_id": uid, "text": "📝 Чтобы отправить отзыв админу, напиши:\n/feedback <текст сообщения>"})
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Инструкция отправлена"})
         elif action == "top":
-            tg_send_text(token, uid, build_top_text())
+            l_txt, l_kb = build_leaderboard_view(is_en=is_en)
+            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": l_txt, "reply_markup": {"inline_keyboard": l_kb}})
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Топ отправлен"})
         elif action == "mode":
             if uid != admin_id:
@@ -1643,6 +1662,82 @@ def handle_command(uid, username, text, token, admin_id):
     else:
         tg_send_text(token, uid, "Slash-команды убраны. Используй /menu для действий и /help для подсказки.")
     return True
+
+
+LEADERBOARD_URL = "https://notes-share.smolevich90.workers.dev/api/smolevich-ai-bot/free-models"
+LEADERBOARD_CACHE_TTL_SEC = 300
+PROVIDER_CODES = {"openrouter": "o", "groq": "g", "cerebras": "c", "nvidia": "n"}
+PROVIDER_BY_CODE = {v: k for k, v in PROVIDER_CODES.items()}
+
+leaderboardCache = {"ts": 0.0, "payload": None}
+leaderboardCacheLock = threading.Lock()
+
+
+def fetch_leaderboard(force=False):
+    """The board the benchmark publishes. Cached: a button press must not hit the worker."""
+    with leaderboardCacheLock:
+        cached = leaderboardCache["payload"]
+        if cached is not None and not force and time.time() - leaderboardCache["ts"] < LEADERBOARD_CACHE_TTL_SEC:
+            return cached
+    try:
+        req = urllib.request.Request(LEADERBOARD_URL, headers={"User-Agent": "smolevich-ai-bot"})
+        with urllib.request.urlopen(req, timeout=10) as f:
+            payload = json.loads(f.read().decode())
+    except Exception as e:
+        log.error(f"leaderboard fetch: {e}")
+        with leaderboardCacheLock:
+            return leaderboardCache["payload"]
+    with leaderboardCacheLock:
+        leaderboardCache["ts"] = time.time()
+        leaderboardCache["payload"] = payload
+    return payload
+
+
+def solved_out_of_ten(entry):
+    """Native pass rate as whole answers out of ten; None when the model was never measured."""
+    native = (entry.get("scores") or {}).get("native")
+    if native is None:
+        return None
+    try:
+        return int(round(float(native) * 10))
+    except (TypeError, ValueError):
+        return None
+
+
+def build_leaderboard_view(is_en=False):
+    """Published board as plain sentences, each row offering to switch to that model."""
+    payload = fetch_leaderboard()
+    entries = (payload or {}).get("models") or []
+    if not entries:
+        txt = ("Measurements are still running — check back tomorrow."
+               if is_en else "Замеры ещё идут — загляни завтра.")
+        return txt, [[{"text": ("← Back" if is_en else "← Назад"), "callback_data": "menu:back"}]]
+
+    # The published `rank` comes from a combined score that ranks a 72%-model above an 89% one.
+    # Until the publisher is fixed, order by the only number a human can check: answers solved.
+    entries = sorted(entries, key=lambda e: (solved_out_of_ten(e) is None, -(solved_out_of_ten(e) or 0)))
+
+    lines = ["🏆 Free models — how they do" if is_en else "🏆 Бесплатные модели — как справляются"]
+    kb = []
+    for i, e in enumerate(entries, start=1):
+        model = e.get("model") or ""
+        provider = (e.get("provider") or "").strip()
+        solved = solved_out_of_ten(e)
+        short = model.split("/")[-1] if "/" in model else model
+        if solved is None:
+            verdict = "not enough data yet" if is_en else "данных пока мало"
+        else:
+            verdict = (f"solves {solved} of 10" if is_en else f"решает {solved} из 10")
+        lines.append(f"{i}. {short} · {provider}\n   {verdict}")
+        code = PROVIDER_CODES.get(provider.lower())
+        if code and model:
+            kb.append([{"text": (f"Try {short}" if is_en else f"Попробовать {short}"),
+                        "callback_data": f"try:{code}:{model}"}])
+    updated = (payload or {}).get("updatedAt") or ""
+    if updated[:10]:
+        lines.append(("\nMeasured " if is_en else "\nЗамерено ") + updated[:10])
+    kb.append([{"text": ("← Back" if is_en else "← Назад"), "callback_data": "menu:back"}])
+    return "\n".join(lines), kb
 
 
 def build_provider_health_text():
