@@ -12,14 +12,13 @@ import re
 from pathlib import Path
 from typing import Any
 
+# Only tags the task explicitly asks for. Loose fallbacks used to fire on 30% of
+# responses and were right 11.7% of the time — 5 points of accuracy out of thin air,
+# handed to models that ignored the format.
 NUMERIC_PATTERNS = [
-    re.compile(r"####\s*(-?[\d]+(?:\.[\d]+)?)"),
     re.compile(r"\\boxed\s*\{\s*(-?[\d]+(?:\.[\d]+)?)\s*\}"),
     re.compile(r"ANSWER\s*[:=]\s*(-?[\d]+(?:\.[\d]+)?)", re.IGNORECASE),
-    re.compile(r"(-?[\d]+(?:\.[\d]+)?)\s*$"),
 ]
-
-LAST_NUMBER = re.compile(r"-?[\d]+(?:\.[\d]+)?")
 
 
 def _to_float(value: Any) -> float | None:
@@ -31,16 +30,14 @@ def _to_float(value: Any) -> float | None:
 
 def extract_numeric(text: str) -> float | None:
     cleaned = (text or "").replace(",", "").strip()
+    # Last match wins: reasoning restates numbers, the tagged answer comes last.
+    found = None
     for pat in NUMERIC_PATTERNS:
-        m = pat.search(cleaned)
-        if m:
+        for m in pat.finditer(cleaned):
             f = _to_float(m.group(1))
             if f is not None:
-                return f
-    matches = LAST_NUMBER.findall(cleaned)
-    if matches:
-        return _to_float(matches[-1])
-    return None
+                found = f
+    return found
 
 
 def score_gsm8k_numeric(response: str, ground_truth: Any) -> tuple[bool, float, str]:

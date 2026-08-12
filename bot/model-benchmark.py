@@ -289,7 +289,9 @@ def enqueue_jobs(args: argparse.Namespace) -> str:
                 for mode, task_list in groups:
                     for task in task_list:
                         samples = load_dataset(args.datasets_dir, task["dataset"])
-                        seed_key = f"{batch_id}:{provider}:{model['model_id']}:{task['id']}"
+                        # Same questions for every model in the batch: a per-model seed handed
+                        # them different problems, worth ±0.071 of pure noise in the score.
+                        seed_key = f"{batch_id}:{task['id']}"
                         chosen = pick_samples(samples, int(task.get("samples_per_run") or 1), seed_key)
                         for sample in chosen:
                             sample_id = str(sample.get("id") or "")
@@ -473,6 +475,14 @@ def native_completion(
         content = message.get("content")
         if content is None:
             content = choices[0].get("text", "")
+        # Reasoning models spend the budget in a separate field and leave content empty;
+        # 825 zero scores were models that had answered, just not where we looked.
+        if not str(content or "").strip():
+            for key in ("reasoning", "reasoning_content"):
+                alt = message.get(key)
+                if alt and str(alt).strip():
+                    content = alt
+                    break
         return str(content or ""), latency_ms, None, usage
     except urllib.error.HTTPError as e:
         body = ""
@@ -827,6 +837,14 @@ def context_window_hint(model_id: str) -> str:
     return ""
 
 
+def row_error(row: Any) -> str:
+    """The error column, absent on databases predating it."""
+    try:
+        return str(row["error"] or "")
+    except (IndexError, KeyError):
+        return ""
+
+
 def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
     now = now_ts()
     cutoff = now - max(1, args.lookback_hours) * 3600
@@ -839,7 +857,8 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
                 SELECT provider, model_id, mode, task_id, sample_id, latency_ms, ok, score, ts, batch_id,
                        json_extract(details_json, '$.usage.prompt_tokens') AS prompt_tokens,
                        json_extract(details_json, '$.usage.completion_tokens') AS completion_tokens,
-                       json_extract(details_json, '$.usage.total_tokens') AS total_tokens
+                       json_extract(details_json, '$.usage.total_tokens') AS total_tokens,
+                       error
                 FROM model_benchmark_results
                 WHERE ts >= ?
                 ORDER BY ts DESC
@@ -915,8 +934,12 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
         key3 = (provider, model_id, mode)
         pm = (provider, model_id)
 
-        bench_score_samples.setdefault(key3, []).append((ts, score))
-        bench_runs[key3] = bench_runs.get(key3, 0) + 1
+        # A 429 or a dead harness is availability, already priced into health_rate.
+        # Counting it as a wrong answer charges the model twice for one outage.
+        transport_failure = bool(row_error(row))
+        if not transport_failure:
+            bench_score_samples.setdefault(key3, []).append((ts, score))
+            bench_runs[key3] = bench_runs.get(key3, 0) + 1
         if ok and latency_ms_row > 0:
             bench_latency_samples.setdefault(key3, []).append((ts, float(latency_ms_row)))
         bench_last_ts[pm] = max(bench_last_ts.get(pm, 0), ts)
