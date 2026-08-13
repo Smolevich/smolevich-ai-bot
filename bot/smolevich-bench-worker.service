@@ -1,0 +1,22 @@
+[Unit]
+Description=smolevich-ai-bot benchmark Temporal worker
+After=network-online.target
+Wants=network-online.target
+OnFailure=hetzner-unit-alert@%n.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/smolevich-ai-bot/worker
+EnvironmentFile=/opt/smolevich-ai-bot/.env
+# model-benchmark and agent/* stay stdlib-only and are imported from here by path
+Environment=PYTHONPATH=/usr/local/bin
+Environment=BOT_BENCHMARK_BIN=/usr/local/bin/model-benchmark
+ExecStart=/opt/smolevich-ai-bot/worker/.venv/bin/python -m temporal_jobs.worker
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=30
+SuccessExitStatus=143
+
+[Install]
+WantedBy=multi-user.target

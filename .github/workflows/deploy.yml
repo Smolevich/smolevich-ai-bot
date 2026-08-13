@@ -24,7 +24,7 @@ jobs:
           python3 -m py_compile bot/smolevich-ai-bot.py bot/migrate.py \
             bot/model-health-check.py bot/model-audio-check.py bot/model-media-check.py \
             bot/model-benchmark.py bot/scripts/refresh-benchmark-datasets.py \
-            bot/agent/*.py
+            bot/agent/*.py bot/temporal_jobs/*.py
 
       - name: Unit tests
         run: python3 -m unittest discover -s tests -v
@@ -51,7 +51,7 @@ jobs:
           username: ${{ secrets.VDS_USER }}
           key: ${{ secrets.VDS_SSH_KEY }}
           passphrase: ${{ secrets.VDS_SSH_PASSPHRASE }}
-          source: bot/smolevich-ai-bot.py,bot/migrate.py,bot/model-health-check.py,bot/model-audio-check.py,bot/model-media-check.py,bot/model-benchmark.py,bot/benchmark-tasks.json,bot/benchmark-tasks.md,bot/benchmark-datasets,bot/scripts,bot/smolevich-ai-bot.service,bot/migrations,bot/agent,bot/Containerfile.acpx-claude,bot/cron.d,bot/logrotate.d
+          source: bot/smolevich-ai-bot.py,bot/migrate.py,bot/model-health-check.py,bot/model-audio-check.py,bot/model-media-check.py,bot/model-benchmark.py,bot/benchmark-tasks.json,bot/benchmark-tasks.md,bot/benchmark-datasets,bot/scripts,bot/smolevich-ai-bot.service,bot/migrations,bot/agent,bot/Containerfile.acpx-claude,bot/cron.d,bot/logrotate.d,bot/temporal_jobs,bot/smolevich-bench-worker.service
           target: /tmp/deploy-bot
           strip_components: 1
 
@@ -92,6 +92,22 @@ jobs:
             sudo cp /tmp/deploy-bot/agent/*.py /usr/local/bin/agent/
             sudo install -m 0644 /tmp/deploy-bot/cron.d/model-checks /etc/cron.d/model-checks
             sudo install -m 0644 /tmp/deploy-bot/logrotate.d/model-checks /etc/logrotate.d/model-checks
+
+            # Benchmark worker: its venv carries temporalio, the bot itself stays stdlib-only.
+            sudo mkdir -p "$APP_DIR/worker"
+            sudo rm -rf "$APP_DIR/worker/temporal_jobs"
+            sudo cp -r /tmp/deploy-bot/temporal_jobs "$APP_DIR/worker/temporal_jobs"
+            sudo cp /tmp/deploy-bot/temporal_jobs/pyproject.toml /tmp/deploy-bot/temporal_jobs/uv.lock "$APP_DIR/worker/"
+            sudo install -m 0644 /tmp/deploy-bot/smolevich-bench-worker.service /etc/systemd/system/smolevich-bench-worker.service
+            if [ -n "$V_TEMPORAL_ADDR" ] && [ -n "$V_TEMPORAL_KEY" ]; then
+              (cd "$APP_DIR/worker" && sudo /usr/local/bin/uv sync --frozen --no-dev)
+              sudo systemctl daemon-reload
+              sudo systemctl enable --now smolevich-bench-worker
+              sudo systemctl restart smolevich-bench-worker
+            else
+              echo "TEMPORAL_* не заданы в Vault — воркер бенчмарка не включается, работает cron"
+              sudo systemctl disable --now smolevich-bench-worker 2>/dev/null || true
+            fi
 
             # Rebuild the sandbox image only when Containerfile actually changed.
             CF=/usr/local/bin/Containerfile.acpx-claude
@@ -140,6 +156,10 @@ jobs:
             V_NVIDIA=$(vv NVIDIA_API_KEY NVIDIA_API_KEY)
             V_LEADERBOARD=$(vv MODEL_LEADERBOARD_TOKEN MODEL_LEADERBOARD_TOKEN)
             V_PROXY=$(vv BOT_PROXY_URL PROXY_URL)
+            # Optional: the benchmark worker stays off until these exist in Vault.
+            V_TEMPORAL_ADDR=$(vv TEMPORAL_ADDRESS TEMPORAL_ADDRESS || true)
+            V_TEMPORAL_NS=$(vv TEMPORAL_NAMESPACE TEMPORAL_NAMESPACE || true)
+            V_TEMPORAL_KEY=$(vv TEMPORAL_API_KEY TEMPORAL_API_KEY || true)
             for v in V_OPENROUTER V_GROQ V_CEREBRAS V_NVIDIA V_LEADERBOARD; do
               if [ -z "${!v}" ]; then echo "ERROR: $v пуст и в Vault, и в .env" >&2; exit 1; fi
             done
@@ -170,6 +190,9 @@ jobs:
             CEREBRAS_API_KEY=$V_CEREBRAS
             NVIDIA_API_KEY=$V_NVIDIA
             MODEL_LEADERBOARD_TOKEN=$V_LEADERBOARD
+            TEMPORAL_ADDRESS=$V_TEMPORAL_ADDR
+            TEMPORAL_NAMESPACE=$V_TEMPORAL_NS
+            TEMPORAL_API_KEY=$V_TEMPORAL_KEY
             BOT_BENCHMARK_DISABLED=$BOT_BENCHMARK_DISABLED
             BOT_ACPX_LOCK_PATH=/var/lock/acpx.lock
             BOT_ACPX_LOCK_WAIT=30

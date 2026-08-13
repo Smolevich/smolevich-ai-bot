@@ -8,3 +8,6 @@ __pycache__/
 
 .claude/refactor-plan.md
 .scratch/
+
+# worker venv is built on the server by uv sync
+bot/temporal_jobs/.venv/
