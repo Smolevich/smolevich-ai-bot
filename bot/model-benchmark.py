@@ -605,6 +605,10 @@ def complete_job(args: argparse.Namespace, job: dict[str, Any], result: dict[str
                 (job_id, batch_id, ts, provider, model_id, mode, task_id, sample_id,
                  latency_ms, ok, score, error, response_excerpt, details_json)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(job_id) WHERE job_id IS NOT NULL DO UPDATE SET
+                ts=excluded.ts, latency_ms=excluded.latency_ms, ok=excluded.ok,
+                score=excluded.score, error=excluded.error,
+                response_excerpt=excluded.response_excerpt, details_json=excluded.details_json
             """,
             (
                 job["id"], job["batch_id"], now_ts(),
