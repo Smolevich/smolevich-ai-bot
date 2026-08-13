@@ -93,21 +93,12 @@ jobs:
             sudo install -m 0644 /tmp/deploy-bot/cron.d/model-checks /etc/cron.d/model-checks
             sudo install -m 0644 /tmp/deploy-bot/logrotate.d/model-checks /etc/logrotate.d/model-checks
 
-            # Benchmark worker: its venv carries temporalio, the bot itself stays stdlib-only.
+            # Worker files land here; enabling it waits until the secrets are read below.
             sudo mkdir -p "$APP_DIR/worker"
             sudo rm -rf "$APP_DIR/worker/temporal_jobs"
             sudo cp -r /tmp/deploy-bot/temporal_jobs "$APP_DIR/worker/temporal_jobs"
             sudo cp /tmp/deploy-bot/temporal_jobs/pyproject.toml /tmp/deploy-bot/temporal_jobs/uv.lock "$APP_DIR/worker/"
             sudo install -m 0644 /tmp/deploy-bot/smolevich-bench-worker.service /etc/systemd/system/smolevich-bench-worker.service
-            if [ -n "$V_TEMPORAL_ADDR" ] && [ -n "$V_TEMPORAL_KEY" ]; then
-              (cd "$APP_DIR/worker" && sudo /usr/local/bin/uv sync --frozen --no-dev)
-              sudo systemctl daemon-reload
-              sudo systemctl enable --now smolevich-bench-worker
-              sudo systemctl restart smolevich-bench-worker
-            else
-              echo "TEMPORAL_* не заданы в Vault — воркер бенчмарка не включается, работает cron"
-              sudo systemctl disable --now smolevich-bench-worker 2>/dev/null || true
-            fi
 
             # Rebuild the sandbox image only when Containerfile actually changed.
             CF=/usr/local/bin/Containerfile.acpx-claude
@@ -225,6 +216,18 @@ jobs:
             if [ -f /etc/cron.d/vds-sessions-cleanup ]; then
               sudo rm -f /etc/cron.d/vds-sessions-cleanup
               echo '0 3 * * * root find /var/lib/smolevich-ai-bot/sessions -mindepth 1 -maxdepth 1 -type d -mtime +14 -exec rm -rf {} +' | sudo tee /etc/cron.d/smolevich-ai-bot-sessions-cleanup >/dev/null
+            fi
+
+            # Benchmark worker: temporalio lives in its own venv, the bot stays stdlib-only.
+            # Runs after .env is written — it reads TEMPORAL_* from there.
+            if [ -n "$V_TEMPORAL_ADDR" ] && [ -n "$V_TEMPORAL_KEY" ]; then
+              (cd "$APP_DIR/worker" && sudo /usr/local/bin/uv sync --frozen --no-dev)
+              sudo systemctl daemon-reload
+              sudo systemctl enable smolevich-bench-worker
+              sudo systemctl restart smolevich-bench-worker
+            else
+              echo "TEMPORAL_* отсутствуют — воркер бенчмарка выключен, работает cron"
+              sudo systemctl disable --now smolevich-bench-worker 2>/dev/null || true
             fi
 
             sudo systemctl daemon-reload
