@@ -849,6 +849,7 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
     now = now_ts()
     cutoff = now - max(1, args.lookback_hours) * 3600
     tasks = load_tasks(args.tasks_path)
+    active_task_ids = {str(t.get("id")) for group in ("native", "claude") for t in (tasks.get(group) or [])}
     with connect(args.db) as conn:
         conn.row_factory = sqlite3.Row
         try:
@@ -937,6 +938,10 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
         # A 429 or a dead harness is availability, already priced into health_rate.
         # Counting it as a wrong answer charges the model twice for one outage.
         transport_failure = bool(row_error(row))
+        # Results of retired tasks stay in the table but must not blend into the current suite:
+        # GSM8K and MMLU-Pro are not the same scale and averaging them means nothing.
+        if str(row["task_id"] or "") not in active_task_ids:
+            continue
         if not transport_failure:
             bench_score_samples.setdefault(key3, []).append((ts, score))
             bench_runs[key3] = bench_runs.get(key3, 0) + 1
@@ -1086,6 +1091,10 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "source": "smolevich-ai-bot",
         "updated_at": now,
+        # Consumers must not draw a line across a suite change: the questions changed,
+        # so numbers before and after are not comparable.
+        "suite_version": int(tasks.get("version") or 1),
+        "suite_started_at": str(tasks.get("suite_started_at") or ""),
         "tasks": tasks,
         "models": models,
     }

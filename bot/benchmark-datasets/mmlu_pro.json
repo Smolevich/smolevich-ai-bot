@@ -1,0 +1,431 @@
+{
+  "config": "default",
+  "dataset": "TIGER-Lab/MMLU-Pro",
+  "fetched_at": "2026-08-13T11:42:01Z",
+  "license": "MIT",
+  "samples": [
+    {
+      "category": "history",
+      "ground_truth": "J",
+      "id": "mmlu_pro_test_4554",
+      "question": "This question refers to the following information.\n\"The question, therefore, should be quickly settled, whether free colored persons, born and naturalized in this country, are not American citizens, and justly entitled to all the rights, privileges and immunities of citizens of the several states; and whether the Constitution of the United States makes or authorizes any invidious distinction with regard to the color or condition of free inhabitants.\n\"For myself, I have not the shadow of doubt on the subject. I believe that the rights of the free colored persons need only to be vindicated before the U.S. Supreme Court, to be obtained; that no prejudice or sophistry . . . can prevent their acknowledgement . . . and that the present laws, affecting your condition, are clearly unconstitutional. The fact that you have been treated, by common consent and common usage, as aliens and brutes, is not proof that such treatment is legal, but only shows the strength, the bitterness, and the blindness of prejudice.\"\n—William Lloyd Garrison, \"To the Free People of Color of the United States,\" The Liberator, January 15, 1831\nThe argument put forth by William Lloyd Garrison in the passage was later contradicted in which of the following Supreme Court decisions?\n\nA) United States v. Nixon (1974)\nB) Miranda v. Arizona (1966)\nC) Gideon v. Wainwright (1963)\nD) Marbury v. Madison (1803)\nE) Brown v. Board of Education of Topeka (1954)\nF) Ex parte Milligan (1866)\nG) Roe v. Wade (1973)\nH) Plessy v. Ferguson (1896)\nI) McCulloch v. Maryland (1819)\nJ) Dred Scott v. Sanford (1857)",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "history",
+      "ground_truth": "A",
+      "id": "mmlu_pro_test_4555",
+      "question": "This question refers to the following information.\n\"In one view the slaveholders have a decided advantage over all opposition. It is well to notice this advantage—the advantage of complete organization. They are organized; and yet were not at the pains of creating their organizations. The State governments, where the system of slavery exists, are complete slavery organizations. The church organizations in those States are equally at the service of slavery; while the Federal Government, with its army and navy, from the chief magistracy in Washington, to the Supreme Court, and thence to the chief marshalship at New York, is pledged to support, defend, and propagate the crying curse of human bondage. The pen, the purse, and the sword, are united against the simple truth, preached by humble men in obscure places.\"\nFrederick Douglass, 1857\nFrederick Douglass was most influenced by which of the following social movements?\n\nA) Second Great Awakening\nB) The Enlightenment\nC) The Temperance Movement\nD) The Abolitionist Movement\nE) Manifest Destiny\nF) The Civil Rights Movement\nG) First Great Awakening\nH) The Women's Suffrage Movement\nI) Popular Sovereignty\nJ) The Industrial Revolution",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "history",
+      "ground_truth": "C",
+      "id": "mmlu_pro_test_4556",
+      "question": "This question refers to the following information.\nFor the catastrophe of 1914 the Germans are responsible. … Germany, in this matter, was unfortunate enough to allow herself (in spite of her skill at dissimulation) to be betrayed into an excess of candour by her characteristic tendency to go to extremes. Deutschland über alles. Germany above everything! … There you have the ultimate framework of an old but childish race.\nGeorges Clemenceau, Grandeur and Misery of Victory, 1930\nFrom the passage, one may infer that Clemenceau believed\n\nA) that Germany's skill at dissimulation was responsible for its victory in the war\nB) that the reason Germany lost the war was that it was betrayed from within\nC) that the lyrics from the popular song Deutschland über alles (which eventually became the German national anthem) were evidence of Germany's aggressive attitude\nD) that Germany's misfortune in the war was due to its lack of skill in dissimulation\nE) that the lyrics from the popular song Deutschland über alles (which eventually became the German national anthem) were the reason Germany started the war\nF) that Germany provided the ultimate framework for modern warfare\nG) that Germany's excessive candour led to its downfall in the war",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "history",
+      "ground_truth": "H",
+      "id": "mmlu_pro_test_4557",
+      "question": "This question refers to the following information.\nRead the documents below.\nSource 1\nIf then by the Use of Machines, the Manufacture of Cotton, an Article which we import, and are supplied with from other Countries, and which can everywhere be procured on equal Terms, has met with such amazing Success, may not greater Advantages be reasonably expected from cultivating to the utmost the Manufacture of Wool, the Produce of our own Island, an Article in Demand in all Countries, almost the universal Clothing of Mankind?\nIn the Manufacture of Woollens, the Scribbling Mill, the Spinning Frame, and the Fly Shuttle, have reduced manual Labour nearly One third, and each of them at its-first Introduction carried an Alarm to the Work People, yet each has contributed to advance the Wages and to increase the Trade, so that if an Attempt was now made to deprive us of the Use of them, there is no Doubt, but every Person engaged in the Business, would exert himself to defend them.\n—Statement by the Cloth Merchants of Leeds, 1791\nSource 2\nCome, cropper lads of high renown,\nWho love to drink good ale that's brown,\nAnd strike each haughty tyrant down,\nWith hatchet, pike, and gun!\nOh, the cropper lads for me,\nThe gallant lads for me,\nWho with lusty stroke,\nThe shear frames broke,\nThe cropper lads for me!\nWhat though the specials still advance,\nAnd soldiers nightly round us prance;\nThe cropper lads still lead the dance,\nWith hatchet, pike, and gun!\nOh, the cropper lads for me,\nThe gallant lads for me,\nWho with lusty stroke\nThe shear frames broke,\nThe cropper lads for me!\n—Luddite Song, The Cropper's Song, c. 1812\nWhich of the following economic theories is Source 1 above referencing in support of the expansion and use of machines?\n\nA) Laissez-faire capitalism\nB) Protectionism\nC) Bullionism\nD) Socialism\nE) Monetarism\nF) Marxism\nG) Industrialization\nH) Mercantilism\nI) Free Trade\nJ) Keynesian economics",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "history",
+      "ground_truth": "I",
+      "id": "mmlu_pro_test_4558",
+      "question": "This question refers to the following information.\nI am of opinion that the principal and true profession of the Courtier ought to be that of arms; which I would have him follow actively above all else, and be known among others as bold and strong, and loyal to whomsoever he serves. . . .\nI would have him well built and shapely of limb, and would have him show strength and lightness and suppleness, and know all bodily exercises that befit a man of war; whereof I think the first should be to handle every sort of weapon well on foot and on horse, to understand the advantages of each, and especially to be familiar with those weapons that are ordinarily used among gentlemen. . . .\nOur Courtier then will be esteemed excellent and will attain grace in everything, particularly in speaking. . . .\nI would have him more than passably accomplished in letters, at least in those studies that are called the humanities, and conversant not only with the Latin language but with the Greek, for the sake of the many different things that have been admirably written therein. Let him be well versed in the poets, and not less in the orators and historians, and also proficient in writing verse and prose, especially in this vulgar [vernacular] tongue of ours. . . .\nYou must know that I am not content with the Courtier unless he be also a musician and unless, besides understanding and being able to read notes, he can play upon divers instruments. . . .\nI wish our Courtier to guard against getting the name of a liar or a boaster, which sometimes befalls even those who do not deserve it.\n—From Baldassare Castiglione's Book of the Courtier, 1528\nWhich of the following skills that Castiglione recommends for a courtier would be valued LEAST by a European gentleman at the end of the twentieth century?\n\nA) Being able to handle every sort of weapon well on foot and on horse\nB) Expertise with multiple languages\nC) Guarding against getting the name of a liar or a boaster\nD) Being strong and attractive\nE) Musical proficiency and ability to read notes\nF) Familiarity with the poets, orators, and historians\nG) Being bold, strong, and loyal to whomsoever he serves\nH) Ability to write poetry and prose\nI) Expertise with many kinds of weapons\nJ) Being well built, shapely of limb, and showing strength and lightness",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "history",
+      "ground_truth": "I",
+      "id": "mmlu_pro_test_4559",
+      "question": "This question refers to the following information.\n\"In 1500 that work appeared which Erasmus had written after his misfortune at Dover, and had dedicated to Mountjoy, the Adagiorum Collectanea. It was a collection of about eight hundred proverbial sayings drawn from the Latin authors of antiquity and elucidated for the use of those who aspired to write an elegant Latin style. In the dedication Erasmus pointed out the profit an author may derive, both in ornamenting his style and in strengthening his argumentation, from having at his disposal a good supply of sentences hallowed by their antiquity. He proposes to offer such a help to his readers. What he actually gave was much more. He familiarized a much wider circle than the earlier humanists had reached with the spirit of antiquity.\nUntil this time the humanists had, to some extent, monopolized the treasures of classic culture, in order to parade their knowledge of which the multitude remained destitute, and so to become strange prodigies of learning and elegance. With his irresistible need of teaching and his sincere love for humanity and its general culture, Erasmus introduced the classic spirit, in so far as it could be reflected in the soul of a sixteenth-century Christian, among the people. Not he alone; but none more extensively and more effectively. Not among all the people, it is true, for by writing in Latin he limited his direct influence to the educated classes, which in those days were the upper classes.\nErasmus made current the classic spirit. Humanism ceased to be the exclusive privilege of a few. According to Beatus Rhenanus he had been reproached by some humanists, when about to publish the Adagia, for divulging the mysteries of their craft. But he desired that the book of antiquity should be open to all.\"\nJohan Huizinga, twentieth-century Dutch philosopher, Erasmus and the Age of Reformation, 1924\nAccording to Huizinga, Erasmus's legacy was more significant than that of earlier humanists because\n\nA) he wrote exclusively about religious matters\nB) he wrote a greater number of books than his predecessors\nC) he was the first to translate Latin proverbs into the vernacular\nD) he was more critical of the Church than his predecessors were\nE) he had a wider variety of interests than his predecessors had\nF) he was less interested in the pomp and circumstance of academia\nG) he had more support from the Church\nH) he made the classic spirit more accessible by teaching it\nI) he valued educating the masses more than his predecessors had\nJ) he wrote in a language that was understandable to the masses, unlike his predecessors",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "history",
+      "ground_truth": "B",
+      "id": "mmlu_pro_test_4560",
+      "question": "This question refers to the following information.\nThe following quote is from Voltaire in response to the 1755 Lisbon earthquake.\nMy dear sir, nature is very cruel. One would find it hard to imagine how the laws of movement cause such frightful disasters in the best of possible worlds. A hundred thousand ants, our fellows, crushed all at once in our ant-hill, and half of them perishing, no doubt in unspeakable agony, beneath the wreckage from which they cannot be drawn. Families ruined all over Europe, the fortune of a hundred businessmen, your compatriots, swallowed up in the ruins of Lisbon. What a wretched gamble is the game of human life! What will the preachers say, especially if the palace of the Inquisition is still standing? I flatter myself that at least the reverend father inquisitors have been crushed like others. That ought to teach men not to persecute each other, for while a few holy scoundrels burn a few fanatics, the earth swallows up one and all.\n—Voltaire, in a letter, 1755\nWhich of the following Enlightenment philosophes questioned reliance on reason and began the Romantic Movement for the rationale given?\n\nA) Thomas Hobbes because he thought human nature was naturally cruel and selfish.\nB) Jean-Jacques Rousseau because he thought society corrupted noble souls.\nC) Mary Wollstonecraft because she railed against the subjugation of women emotionally.\nD) Denis Diderot because he believed emotions were superior to reason.\nE) John Locke because he thought individuals were corrupted by power.\nF) Immanuel Kant because he thought that reason was insufficient to explain the mysteries of the universe.\nG) Adam Smith because he stated that reason could not be used to understand how another feels.\nH) Voltaire himself because he criticized the cruelty of nature and human suffering.\nI) Baron Montesquieu because he thought that governments were not capable of being fair.\nJ) David Hume because he believed that reason was inadequate to make moral judgments.",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "history",
+      "ground_truth": "D",
+      "id": "mmlu_pro_test_4561",
+      "question": "This question refers to the following information.\nRead the list of complaints below.\nArticle 3: Frenchmen should regard as laws of the kingdom those alone which have been prepared by the national assembly and sanctioned by the king.\nArticle 11: Personal liberty, proprietary rights and the security of citizens shall be established in a clear, precise and irrevocable manner. All lettres de cachet shall be abolished forever, subject to certain modifications which the States General may see fit to impose.\nArticle 12: And to remove forever the possibility of injury to the personal and proprietary rights of Frenchmen, the jury system shall be introduced in all criminal cases, and in civil cases for the determination of fact, in all the courts of the realm.\nArticle 17: All distinctions in penalties shall be abolished; and crimes committed by citizens of the different orders shall be punished irrespectively, according to the same forms of law and in the same manner. The States General shall seek to bring it about that the effects of transgression shall be confined to the individual and shall not be reflected upon the relatives of the transgressor, themselves innocent of all participation.\nArticle 21: No tax shall be legal unless accepted by the representatives of the people and sanctioned by the king.\n—Cahiers of the Third Estate of Versailles, 1789\nDuring the radical phase of the revolution, which of the following changes instituted by Robespierre was LEAST beneficial to the defense of France?\n\nA) Encouraging the spread of revolutionary ideas abroad\nB) Implementing the Reign of Terror\nC) Expelling foreign diplomats\nD) Pursuing a policy of de-Christianization\nE) Fixing prices and wages\nF) Abolishing slavery in French colonies\nG) Promoting soldiers based upon their merits in the field\nH) Enforcing strict rationing of food supplies\nI) Instituting a new Republican Calendar\nJ) The conscription of huge armies",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "history",
+      "ground_truth": "I",
+      "id": "mmlu_pro_test_4562",
+      "question": "This question refers to the following information.\n\"His Majesty the Emperor of China agrees, that British subjects, with their families and establishments, shall be allowed to reside, for the purposes of carrying on their mercantile pursuits, without molestation or restraint, at the cities and towns of Canton, Amoy, Foochowfoo, Ningpo, and Shanghai; and Her Majesty the Queen of Great Britain, &c., will appoint Superintendents, or Consular officers, to reside at each of the above-named cities or towns, to be the medium of communication between the Chinese authorities and the said merchants, and to see that the just duties and other dues of the Chinese Government, as hereafter provided for, are duly discharged by Her Britannic Majesty's subjects.\"\nTreaty of Nanjing, 1839\nThe concessions offered in this treaty most directly created British\n\nA) colonies\nB) diplomatic embassies\nC) outposts\nD) vassal states\nE) militarized zones\nF) dominions\nG) trading companies\nH) protectorates\nI) spheres of influence\nJ) businesses",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "history",
+      "ground_truth": "J",
+      "id": "mmlu_pro_test_4563",
+      "question": "This question refers to the following information.\n\"The Government of the German Reich and The Government of the Union of Soviet Socialist Republics desirous of strengthening the cause of peace between Germany and the U.S.S.R., and proceeding from the fundamental provisions of the Neutrality Agreement concluded in April, 1926 between Germany and the U.S.S.R., have reached the following Agreement:\nArticle I. Both High Contracting Parties obligate themselves to desist from any act of violence, any aggressive action, and any attack on each other, either individually or jointly with other Powers.\nArticle II. Should one of the High Contracting Parties become the object of belligerent action by a third Power, the other High Contracting Party shall in no manner lend its support to this third Power.\nArticle III. The Governments of the two High Contracting Parties shall in the future maintain continual contact with one another for the purpose of consultation in order to exchange information on problems affecting their common interests.\nArticle IV. Should disputes or conflicts arise between the High Contracting Parties shall participate in any grouping of Powers whatsoever that is directly or indirectly aimed at the other party.\nArticle V. Should disputes or conflicts arise between the High Contracting Parties over problems of one kind or another, both parties shall settle these disputes or conflicts exclusively through friendly exchange of opinion or, if necessary, through the establishment of arbitration commissions.\"\nMolotov-Ribbentrop Pact, 1939\nThe agreement described in the text is most similar to the\n\nA) Treaty of Tordesillas (1494)\nB) Lateran Treaty (1929)\nC) Treaty of Versailles (1919)\nD) Kellogg-Briand Pact (1928)\nE) Sykes-Picot Agreement (1916)\nF) Treaty of Ghent (1814)\nG) Treaty of Brest-Litovsk (1918)\nH) Munich Agreement (1938)\nI) Treaty of Tilsit (1807)\nJ) Triple Entente (1907)",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "history",
+      "ground_truth": "I",
+      "id": "mmlu_pro_test_4564",
+      "question": "This question refers to the following information.\nAlbeit the king's Majesty justly and rightfully is and ought to be the supreme head of the Church of England, and so is recognized by the clergy of this realm in their convocations, yet nevertheless, for corroboration and confirmation thereof, and for increase of virtue in Christ's religion within this realm of England, and to repress and extirpate all errors, heresies, and other enormities and abuses heretofore used in the same, be it enacted, by authority of this present Parliament, that the king, our sovereign lord, his heirs and successors, kings of this realm, shall be taken, accepted, and reputed the only supreme head in earth of the Church of England, called Anglicans Ecclesia; and shall have and enjoy, annexed and united to the imperial crown of this realm, as well the title and style thereof, as all honors, dignities, preeminences, jurisdictions, privileges, authorities, immunities, profits, and commodities to the said dignity of the supreme head of the same Church belonging and appertaining; and that our said sovereign lord, his heirs and successors, kings of this realm, shall have full power and authority from time to time to visit, repress, redress, record, order, correct, restrain, and amend all such errors, heresies, abuses, offenses, contempts, and enormities, whatsoever they be, which by any manner of spiritual authority or jurisdiction ought or may lawfully be reformed, repressed, ordered, redressed, corrected, restrained, or amended, most to the pleasure of Almighty God, the increase of virtue in Christ's religion, and for the conservation of the peace, unity, and tranquility of this realm; any usage, foreign land, foreign authority, prescription, or any other thing or things to the contrary hereof notwithstanding.\nEnglish Parliament, Act of Supremacy, 1534\nFrom the passage and its historical context, one may infer that the Act was, in part,\n\nA) a move to consolidate all religious power under the monarchy\nB) a measure to strengthen England's ties with the Catholic Church\nC) a response to the threat of invasion by Spain\nD) an attempt to legitimize Henry VIII's only heir\nE) a move to prevent religious conflict within England\nF) an attempt to ally England with the Holy Roman Emperor\nG) an attempt to discredit the Pope's authority in England\nH) an attempt to prevent the spread of Protestantism in England\nI) a solution to Henry VIII's financial difficulties\nJ) an attempt to establish a state religion in England",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "history",
+      "ground_truth": "D",
+      "id": "mmlu_pro_test_4565",
+      "question": "This question refers to the following information.\nWhile some theorists in the Middle Ages argued that the jihad was a defensive war… most authorities held that the obligation of jihad did not lapse until all the world was brought under the sway of Islam. The Bahr [al-Fava'id, or \"Sea of Precious Virtues,\" written in the 1150s or 1160s] insists that the first duty of a Muslim ruler is to prosecute the jihad and bring about the victory of Islam, and if he does not do so and he makes peace with the infidel, that ruler would be better dead than alive, for he would be corrupting the world.\nRobert Irwin, \"Islam and the Crusades,\" 1995\nIt is strange how the Christians round Mount Lebanon, when they see any Muslim hermits, bring them food and treat them kindly, saying that these men are dedicated to the Great and Glorious God and that they should therefore share with them. Likewise, not one Christian merchant was stopped or hindered in Muslim territories.\nIbn Jubayr, Muslim scholar, traveling to Mecca and Jerusalem, ca. 1185\nThese two passages are best understood in the context of which of the following?\n\nA) The attempt of a religious group to proselytize to those following another faith\nB) The religious motivations behind the Crusades\nC) The suppression of minority religions in a dominant religious society\nD) The influence of religion on interaction between cultures\nE) The evolution of religious rituals and customs over time\nF) The syncretic fusion of different religious traditions\nG) The political manipulation of religious beliefs\nH) The spread of Islam through peaceful means",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "history",
+      "ground_truth": "H",
+      "id": "mmlu_pro_test_4566",
+      "question": "This question refers to the following information.\nLiteracy rates among the Russian-speaking population of late Imperial Russia and the Soviet Union, 1897–1955\nLiteracy Rate\n1897  24%\n1917  45%\n1926  56%\n1937  75%\n1939  81.10%\n1955  99.90%\nSource: Census data and Soviet Ministry of Education\nWhich of the following segments of the Russian/Soviet population would probably have benefited most from the rising literacy rates depicted in the chart?\n\nA) Industrial laborers in major cities\nB) Officers in the armed forces\nC) The urban middle class\nD) Members of the Russian Orthodox clergy\nE) The Russian nobility\nF) Foreign diplomats stationed in Russia\nG) Russian-speaking immigrants in non-Russian territories\nH) The rural peasantry\nI) Members of the Russian Imperial family\nJ) Artists and writers of the time",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "history",
+      "ground_truth": "G",
+      "id": "mmlu_pro_test_4567",
+      "question": "This question refers to the following information.\n\"At least one of the [world's] societies would have to somehow enormously increase its productivity [in order to achieve global hegemony]. That quantum jump would have to be made before the various scientific, technological, agricultural, and industrial revolutions on which our post-quantum-leap world rests. It could only be accomplished by exploiting the ecosystems, mineral resources, and human assets of whole continents outside the lands of the society making the jump. Western Europe did just that by means of its brutality and guns and, more important, by geographical and ecological luck.\"\nCopyright © 2015 Cambridge University Press.\nAlfred Crosby, historian, Ecological Imperialism, 2004\nBased on your knowledge of world history, which of the following contributed LEAST to Western European global hegemony between 1450 and 1750 C.E.?\n\nA) The implementation of joint-stock companies\nB) The exploitation of labor in colonized regions\nC) The exploration of new sea routes to Asia and the Americas\nD) The establishment of trading posts along Asian and African coasts\nE) The exchange of food sources between the Americas and Europe\nF) The spread of Christianity to non-European regions\nG) The development and application of steam-powered technologies\nH) The discovery and colonization of the Americas\nI) The development of advanced naval technology\nJ) Refinement of gunpowder technologies",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "history",
+      "ground_truth": "B",
+      "id": "mmlu_pro_test_4568",
+      "question": "This question refers to the following information.\n\"At least one of the [world's] societies would have to somehow enormously increase its productivity [in order to achieve global hegemony]. That quantum jump would have to be made before the various scientific, technological, agricultural, and industrial revolutions on which our post-quantum-leap world rests. It could only be accomplished by exploiting the ecosystems, mineral resources, and human assets of whole continents outside the lands of the society making the jump. Western Europe did just that by means of its brutality and guns and, more important, by geographical and ecological luck.\"\nCopyright © 2015 Cambridge University Press.\nAlfred Crosby, historian, Ecological Imperialism, 2004\nCrosby's argument in the passage is most likely a response to which of the following developments of the period 1450–1750 C.E.?\n\nA) The development of direct trade links between Western Europe and India\nB) The colonization of North and South America by Western Europeans\nC) The establishment of the Silk Road\nD) The increasing development of seafaring technologies\nE) The beginning of the Industrial Revolution\nF) The scientific revolution\nG) The development of the printing press\nH) The emergence of the Ottoman Empire\nI) The discovery of Australia by Western Europeans",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "history",
+      "ground_truth": "D",
+      "id": "mmlu_pro_test_4569",
+      "question": "Unlike most other early civilizations, Minoan culture shows little evidence of:\n\nA) trade.\nB) warfare.\nC) the development of a common religion.\nD) conspicuous consumption by elites.",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "history",
+      "ground_truth": "B",
+      "id": "mmlu_pro_test_4570",
+      "question": "The secondarily altricial condition of modern human babies may have been an evolutionary solution, in that:\n\nA) it resulted in babies being born with fully formed teeth.\nB) it allowed for subsequent growth of the brain, since bipedalism had resulted in a narrowed birth canal in the female pelvis.\nC) it led to an increase in the size of the newborn's head, allowing for a larger brain.\nD) the brain size of hominids had not grown for more than a million years, making it difficult for babies to walk.\nE) it allowed babies to be born with an instinctive ability to swim.\nF) it allowed for an earlier development of language skills in babies.\nG) it allowed for bipedalism and independence from the mother at an earlier age.\nH) it allowed for growth of the brain to nearly adult size prior to birth, since bipedalism had resulted in a wider birth canal in the female pelvis.\nI) it allowed for the development of advanced motor skills at an earlier age.\nJ) it led to an increase in the gestation period allowing for the brain to fully develop before birth.",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "history",
+      "ground_truth": "A",
+      "id": "mmlu_pro_test_4571",
+      "question": "The earliest-known use of bronze is found in:\n\nA) China.\nB) Africa.\nC) Australia.\nD) North America.\nE) South America.\nF) Europe.\nG) Antarctica.\nH) Greece.\nI) the Indus Valley.",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "history",
+      "ground_truth": "H",
+      "id": "mmlu_pro_test_4572",
+      "question": "What was NOT a deciding factor in the development of Mesopotamian civilization?\n\nA) the need to form alliances with neighboring civilizations for trade and protection\nB) the need to develop a calendar system for agricultural planning\nC) the need to develop a complex social system that would allow the construction of canals\nD) the use of irrigation to produce enough food\nE) the creation of a military force for defense and conquest\nF) the use of domesticated animals for labor and transportation\nG) the need to construct monumental works, such as step-pyramids and temples\nH) the need to concentrate population away from arable lands near rivers\nI) the establishment of a centralized government for law and order\nJ) the need to develop a written language for record keeping and communication",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "history",
+      "ground_truth": "H",
+      "id": "mmlu_pro_test_4573",
+      "question": "What is the difference between an absolute date and a relative date?\n\nA) An absolute date is a fixed point in time, while a relative date is flexible and can be adjusted according to context.\nB) A relative date is derived from radiometric dating techniques, while an absolute date is only associated with written documents.\nC) An absolute date is based on the Gregorian calendar, while a relative date is based on lunar phases.\nD) A relative date refers to a year or a range of years, while an absolute date indicates a chronological order.\nE) A relative date is a date that can be calculated from an absolute date, while an absolute date cannot be derived from a relative date.\nF) A relative date is an exact moment in time, while an absolute date is a general time period.\nG) An absolute date is known by everyone, while a relative date ranges from 30 to 50 years.\nH) An absolute date refers to a year or a range of years, while a relative date indicates a chronological order.\nI) A relative date is determined using carbon dating, while an absolute date is estimated using historical records.",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "math",
+      "ground_truth": "I",
+      "id": "mmlu_pro_test_8752",
+      "question": "Toss a coin repeatedly until two consecutive heads appear. Assume that the probability of the coin landing on heads is 3/7. Calculate the average number of times the coin needs to be tossed before the experiment can end.\n\nA) 9.99999\nB) 10.11111\nC) 11.11111\nD) 12.22222\nE) 5.55556\nF) 13.33333\nG) 6.66667\nH) 8.88889\nI) 7.77778\nJ) 4.44444",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "math",
+      "ground_truth": "F",
+      "id": "mmlu_pro_test_8753",
+      "question": "Assuming we are underground, and the only thing we can observe is whether a person brings an umbrella or not. The weather could be either rainy or sunny. Assuming the P(rain)=0.6 and P(sunny)=0.4. Assuming the weather on day $k$ is dependent on the weather on day $k-1$. We can write the transition probability as P(sunny $\\mid$ sunny) = P(rain $\\mid$ rain) = 0.7. The person has 60\\% chance to bring an umbrella when the weather is rainy, and 40\\% chance to bring an umbrella when the weather is sunny, i.e. P(umbrella $\\mid$ rain) = 0.6 and P(umbrella $\\mid$ sunny) = 0.4. If we observe that the person (1) brought an umbrella on day 1, (2) did not bring an umbrella on day 2, (3) brought an umbrella on day 3.  What are the most likely weather from day 1 to day 3? Return the answer as a list of binary values, where 1 represents rain and 0 represents sunny.\n\nA) [0, 1, 0]\nB) [1, 1, 0]\nC) [0, 0, 0]\nD) [0, 0, 1]\nE) [0, 1, 1]\nF) [1, 1, 1]\nG) [1, 0, 0]\nH) [1, 0, 1]",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "math",
+      "ground_truth": "A",
+      "id": "mmlu_pro_test_8754",
+      "question": "Assuming $x$ and $y$ are both 2-d random variable. The covariance matrix of $x=((1,2),(2,3),(3,5),(4,4))$, $y=((3,4),(1,5),(5,3),(3,3))$ is $Cov$. What is the trace of $Cov$?\n\nA) -0.166\nB) 1.234\nC) 0.000\nD) 0.456\nE) -0.577\nF) 2.718\nG) -2.345\nH) 3.142\nI) 1.732\nJ) -1.234",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "math",
+      "ground_truth": "G",
+      "id": "mmlu_pro_test_8755",
+      "question": "If z = arctan(e^{1 + (1 + x)^2}), what's the derivative of $\\frac{\\partial z}{\\partial x}$ at x = 0.\n\nA) 0.4752\nB) 0.6210\nC) 0.4123\nD) 0.5678\nE) 0.5439\nF) 0.2896\nG) 0.3017\nH) 0.1345\nI) 0.6571\nJ) 0.2198",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "math",
+      "ground_truth": "G",
+      "id": "mmlu_pro_test_8756",
+      "question": "Use the Runge-Kutta method with $h=0.1$ to find approximate values for the solution of the initial value problem $y' + 2y = x^3e^{-2x}$ with y(0)=1 at $x=0.2$.\n\nA) 0.6423\nB) 0.5987\nC) 0.6534\nD) 0.7012\nE) 0.7891\nF) 0.6245\nG) 0.6705\nH) 0.7123\nI) 0.5809\nJ) 0.5607",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "math",
+      "ground_truth": "J",
+      "id": "mmlu_pro_test_8757",
+      "question": "The position of a point for any time t (t>0) s defined by the equations: x=2t, y=ln(t), z = t^2. Find the mean velocity of motion between times t=1 and t=10.\n\nA) 9.00\nB) 12.50\nC) 13.00\nD) 15.00\nE) 14.20\nF) 10.00\nG) 7.75\nH) 8.50\nI) 9.75\nJ) 11.25",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "math",
+      "ground_truth": "B",
+      "id": "mmlu_pro_test_8758",
+      "question": "In triangle ABC, AB = 9x-1, CB = 5x-0.5, AC = 4x+1, and AC = CB. Find the measure of AB.\n\nA) 15\nB) 12.5\nC) 10.5\nD) 10\nE) 16\nF) 11\nG) 13.5\nH) 9.5\nI) 14\nJ) 8",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "math",
+      "ground_truth": "D",
+      "id": "mmlu_pro_test_8759",
+      "question": "Find the smallest positive integer that leaves a remainder of 3 when divided by 5, a remainder of 4 when divided by 7, and a remainder of 2 when divided by 9.\n\nA) 142\nB) 173\nC) 372\nD) 263\nE) 52\nF) 289\nG) 105\nH) 324\nI) 233\nJ) 210",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "math",
+      "ground_truth": "C",
+      "id": "mmlu_pro_test_8760",
+      "question": "Find the sum of all positive integers less than 196 and relatively prime to 98.\n\nA) 7650\nB) 8123\nC) 8232\nD) 8223\nE) 7432\nF) 7900\nG) 8500\nH) 8701\nI) 9022\nJ) 8322",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "math",
+      "ground_truth": "H",
+      "id": "mmlu_pro_test_8761",
+      "question": "\\lim_{x \\to c} |f(x)| = 0. What is \\lim_{x \\to c} f(x)?\n\nA) \\infty (infinity)\nB) Does not exist\nC) 1\nD) Undefined\nE) -1\nF) c\nG) |c|\nH) 0\nI) -c\nJ) \\frac{1}{c} (1 over c)",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "math",
+      "ground_truth": "D",
+      "id": "mmlu_pro_test_8762",
+      "question": "If the quartic x^4 + 3x^3 + 11x^2 + 9x + A has roots k, l, m, and n such that kl = mn, find A.\n\nA) 15\nB) 8\nC) 13\nD) 9\nE) 10\nF) 12\nG) 14\nH) 6\nI) 11\nJ) 7",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "math",
+      "ground_truth": "G",
+      "id": "mmlu_pro_test_8763",
+      "question": "The polynomial $x^3 - Ax + 15$ has three real roots. Two of these roots sum to 5. What is |A|?\n\nA) 19.0\nB) 17.0\nC) 25.0\nD) 23.0\nE) 18.0\nF) 20.0\nG) 22.0\nH) 24.0\nI) 21.0\nJ) 26.0",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "math",
+      "ground_truth": "D",
+      "id": "mmlu_pro_test_8764",
+      "question": "Let W(t) be the standard Brownian motion. Define X(t) = exp{W(t)}, for all t \\in [0, \\infty). Let 0 < s < t. Find Cov(X(s=1/2), X(t=1)).\n\nA) 1.2345\nB) 1.6180\nC) 0.6472\nD) 1.3733\nE) 0.8284\nF) 1.5678\nG) 1.7321\nH) 1.0000\nI) 1.4142\nJ) 0.9876",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "math",
+      "ground_truth": "J",
+      "id": "mmlu_pro_test_8765",
+      "question": "In how many ways can a convex polygon with 8 sides be divided into triangles by connecting its vertices, with no intersecting lines?\n\nA) 140\nB) 90\nC) 80\nD) 160\nE) 150\nF) 120\nG) 100\nH) 200\nI) 110\nJ) 132",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "math",
+      "ground_truth": "D",
+      "id": "mmlu_pro_test_8766",
+      "question": "Does the following series $\\sum_{i=0}^{\\infty} \\frac{n-1}{n^3+1}$ converge?\n\nA) 2.5\nB) 0.5\nC) The series diverges\nD) 0\nE) 1.5\nF) 0.25\nG) 2.0\nH) 0.75\nI) 1.0\nJ) 3.0",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "math",
+      "ground_truth": "J",
+      "id": "mmlu_pro_test_8767",
+      "question": "Find the area of triangle $A B C$, correct to five decimal places, if\n$$\n|A B|=10 \\mathrm{~cm} \\quad|B C|=3 \\mathrm{~cm} \\quad \\angle A B C=107^{\\circ}\n$$\n\nA) 12.34567 cm²\nB) 11.98765 cm²\nC) 19.87654 cm²\nD) 13.56789 cm²\nE) 12.12345 $\\mathrm{cm^2}$\nF) 16.23564 $\\mathrm{cm^2}$\nG) 18.23456 cm²\nH) 15.67890 $\\mathrm{cm^2}$\nI) 17.45678 cm²\nJ) 14.34457 $\\mathrm{cm^2}$",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "math",
+      "ground_truth": "E",
+      "id": "mmlu_pro_test_8768",
+      "question": "25. Consider the initial value problem\n$$\n2 y^{\\prime \\prime}+3 y^{\\prime}-2 y=0, \\quad y(0)=1, \\quad y^{\\prime}(0)=-\\beta,\n$$\nwhere $\\beta>0$.\nFind the smallest value of $\\beta$ for which the solution has no minimum point.\n\nA) 7\nB) 2.5\nC) 4\nD) 1\nE) 2\nF) 6\nG) 5\nH) 1.5\nI) 0.5\nJ) 3",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "math",
+      "ground_truth": "F",
+      "id": "mmlu_pro_test_8769",
+      "question": "A certain vibrating system satisfies the equation $u^{\\prime \\prime}+\\gamma u^{\\prime}+u=0$. Find the value of the damping coefficient $\\gamma$ for which the quasi period of the damped motion is $50 \\%$ greater than the period of the corresponding undamped motion.\n\nA) 1.5923\nB) 1.4142\nC) 1.7321\nD) 1.2247\nE) 1.3333\nF) 1.4907\nG) 1.7089\nH) 1.2500\nI) 1.3295\nJ) 1.6180",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "math",
+      "ground_truth": "A",
+      "id": "mmlu_pro_test_8770",
+      "question": "A home buyer can afford to spend no more than $\\$ 800 /$ month on mortgage payments. Suppose that the interest rate is $9 \\%$ and that the term of the mortgage is 20 years. Assume that interest is compounded continuously and that payments are also made continuously.\nDetermine the total interest paid during the term of the mortgage.\n\nA) 102,965.21 $\nB) $125,789.99\nC) $98,765.43\nD) $75,000.00\nE) $150,000.00\nF) $68,500.45\nG) $110,200.35\nH) $93,450.89\nI) $85,250.65\nJ) $120,345.78",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "math",
+      "ground_truth": "C",
+      "id": "mmlu_pro_test_8771",
+      "question": "Consider the initial value problem\n$$\n3 u^{\\prime \\prime}-u^{\\prime}+2 u=0, \\quad u(0)=2, \\quad u^{\\prime}(0)=0\n$$\nFor $t>0$ find the first time at which $|u(t)|=10$.\n\nA) 14.1234\nB) 9.5678\nC) 10.7598\nD) 16.4321\nE) 15.6789\nF) 11.2345\nG) 12.3456\nH) 7.6543\nI) 13.5791\nJ) 8.9876",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "engineering",
+      "ground_truth": "H",
+      "id": "mmlu_pro_test_11286",
+      "question": "Calculate the change in specific entropy of 1lbmof air when itis compressed from 14psia, 60°F to 84psiaand 460°F.\n\nA) 1.467 Btu/°R\nB) 0.052 Btu/°R\nC) 0.0032 Btu/°R\nD) 0.0248 Btu/°R\nE) 0.200 Btu/°R\nF) 0.1467 Btu/°R\nG) 0.075 Btu/°R\nH) 0.01416 Btu/°R\nI) 0.158 Btu/°R\nJ) 0.235 Btu/°R",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "engineering",
+      "ground_truth": "C",
+      "id": "mmlu_pro_test_11287",
+      "question": "Given the following data for diamond and graphite at 25°C and 1atm Diamond Graphite Units g 1.233 0 Btu / lb mol - °R v 0.00456 0.00712 ft^3/lbm \\beta_T 0.16 × 10^-6 3.0 × 10^-6 atm^-1 determine the pressure that is needed to make diamonds from graphite at 25°C.\n\nA) 25,000 atm\nB) 12,000 atm\nC) 15,500atm\nD) 8,500 atm\nE) 5,000atm\nF) 18,000 atm\nG) 7,500 atm\nH) 20,000atm\nI) 30,000 atm\nJ) 10,000atm",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "engineering",
+      "ground_truth": "A",
+      "id": "mmlu_pro_test_11288",
+      "question": "Air at an initial pressure and temperature of 1 bar and 17°C respectively is contained inside a cylinder. The air is then compressedpolytropically, along a path for which n = 1.30, until the final pressure inside the cylinder is 5 bars. What is the heat transferred per kg of air for this process?\n\nA) - 31.33 kJ/kg\nB) 62.15 kJ/kg\nC) -93.45 kJ/kg\nD) 155.67 kJ/kg\nE) 124.78 kJ/kg\nF) 93.45 kJ/kg\nG) 0 kJ/kg (no heat transfer)\nH) 31.33 kJ/kg\nI) -62.15 kJ/kg\nJ) -124.78 kJ/kg",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "engineering",
+      "ground_truth": "E",
+      "id": "mmlu_pro_test_11289",
+      "question": "Determine the latent heat of vaporization of liquid carbon tetrachlorideat its boiling point of 350°K. The vapor pressure ofCCl_4 is a function of temperature and is given by: gP= - 2,400T^-1 - 5.30logT+ 23.60 (P = mmHg). Assume ideal gas behavior.\n\nA) 6,800 cal/mole\nB) 8,300 cal/mole\nC) 7,000 cal/mole\nD) 6,300 cal/mole\nE) 7,300 cal/mole\nF) 9,500 cal/mole\nG) 5,000 cal/mole\nH) 8,000 cal/mole\nI) 5,500 cal/mole\nJ) 9,100 cal/mole",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "engineering",
+      "ground_truth": "E",
+      "id": "mmlu_pro_test_11290",
+      "question": "Propane is burned in 100% excess air. Combustion is completeand takes place at 100kPa. Determine (a) the dew-pointtemperature of the products of combustion and (b)themoles of H_2O condensed per mole of fuel burned, if theproducts of combustion are cooled to 25°C.\n\nA) 50°C and 3.0kmolH_2O/kmolC_3H_8\nB) 52°C and 2.0 kmol H2O/kmol C3H8\nC) 30°C and 3.5 kmol H2O/kmol C3H8\nD) 38°C and 2.8 kmol H2O/kmol C3H8\nE) 41.53°C and 2.51kmolH_2O/kmolC_3H_8\nF) 45°C and 2.3kmolH_2O/kmolC_3H_8\nG) 60°C and 1.5 kmol H2O/kmol C3H8\nH) 35°C and 2.0kmolH_2O/kmolC_3H_8\nI) 48°C and 1.8 kmol H2O/kmol C3H8\nJ) 55°C and 4.0 kmol H2O/kmol C3H8",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "engineering",
+      "ground_truth": "E",
+      "id": "mmlu_pro_test_11291",
+      "question": "Oxygen initially at 13.8MPa, 15.5°C is throttled in a steady- flow process to a final pressure of 1.38MPa. Assuming the process to be adiabatic, determine the final temperature of oxygen.\n\nA) -20°C\nB) -18°C\nC) -30°C\nD) -25°C\nE) -13.71°C\nF) 0°C\nG) -8.5°C\nH) -5°C\nI) -10°C\nJ) -15°C",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "engineering",
+      "ground_truth": "C",
+      "id": "mmlu_pro_test_11292",
+      "question": "A piston and cylinder arrangement has an initial volume of 1.5 ft^3 and contains air at 400psia. The air is then expanded reversibly at a constant temperature of 85°F. What is the work and heat transferred of the process if the final volume of the air inside the cylinder is 4 ft^3. Assume the temperature of the surroundings to be 85°F.\n\nA) 95 Btu\nB) 120 Btu\nC) 108.92 Btu\nD) 100 Btu",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "engineering",
+      "ground_truth": "H",
+      "id": "mmlu_pro_test_11293",
+      "question": "One cubic foot of oxygen at 100°F and 15psiais compressedadiabatically to 0.4 ft. What then, are the temperatureand pressure of the gas. If the process had beenisothermal, what would the temperature and pressure havebeen?\n\nA) 60.0psia and 360°F, 40.5psia and 100°F\nB) 65.0psia and 370°F, 42.5psia and 100°F\nC) 58.0psia and 365°F, 39.5psia and 100°F\nD) 45.0psia and 300°F, 32.5psia and 100°F\nE) 50.0psia and 320°F, 35.5psia and 100°F\nF) 70.0psia and 380°F, 45.0psia and 100°F\nG) 55.5psia and 340°F, 38.0psia and 100°F\nH) 54.0psia and 350°F, 37.5psia and 100°F\nI) 52.0psia and 330°F, 36.0psia and 100°F\nJ) 48.0psia and 310°F, 34.0psia and 100°F",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "engineering",
+      "ground_truth": "D",
+      "id": "mmlu_pro_test_11294",
+      "question": "A marine research facility uses a towing basin to test models of proposed ship hull configurations. A new hull shape utilizing a bulbous underwater bow is proposed for a nuclear- powered aircraft carrier that is to be 300 m long. A 3-m model has been tested in the towing tank and found to have a maximum practical hull speed of 1.4 m/s. What is the anticipated hull speed for the prototype?\n\nA) 18 m/s\nB) 20 m/s\nC) 12 m/s\nD) 14 m/s\nE) 10 m/s\nF) 25 m/s\nG) 30 m/s\nH) 1.4 m/s\nI) 7 m/s\nJ) 8.5 m/s",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "engineering",
+      "ground_truth": "G",
+      "id": "mmlu_pro_test_11295",
+      "question": "The initial mass of a rocket is to be 100,000 lb, of which 5 percent is to be structure, the remainder fuel and payload. If thespecific impulse of the propellant combination used is 300lb_f/lb_m/sec, calculate the payload mass that would be ableto escape from earth for a single-state and for a two- stagerocket. Neglect aerodynamic drag, gravity forces, and thetermimvolvingp_e- p_a in the thrust equation. Assume escapevelocity of 36,800 fps.\n\nA) 3200 lb_m\nB) 495 lb\nC) 6500 lb_m\nD) 9900lb_m\nE) 1470lb_m\nF) 730 lb_m\nG) 975lb_m\nH) 1500 lb_m\nI) 2500 lb_m\nJ) 5100 lb_m",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "engineering",
+      "ground_truth": "A",
+      "id": "mmlu_pro_test_11296",
+      "question": "(a) It is desired to deliver 1,600gpmat a head of 900 ft with asingle-stage pump. What would be the minimumspeed thatcould be used ? (b) For the conditions of (a), how many stages must the pumphave if arotativespeed of 600 rpm is to be used ?\n\nA) 2060 rpm and 6 stages\nB) 2500 rpm and 8 stages\nC) 1200 rpm and 9 stages\nD) 3000 rpm and 7 stages\nE) 2200 rpm and 2 stages\nF) 3200 rpm and 1 stage\nG) 1600 rpm and 10 stages\nH) 1500 rpm and 4 stages\nI) 1800 rpm and 3 stages\nJ) 1000 rpm and 5 stages",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "engineering",
+      "ground_truth": "E",
+      "id": "mmlu_pro_test_11297",
+      "question": "Using Steinmetz law, determine the ergs loss per cycle in a coreof sheet iron having a net volume of 40 cu cm, in which themaximum flux density is 8,000 gauss. The value of \\eta for sheetiron is 0.004.\n\nA) 0.0401 joules per cycle\nB) 0.0451 joules per cycle\nC) 0.0101 joules per cycle\nD) 0.0251 joules per cycle\nE) 0.0281 joules per cycle\nF) 0.0501 joules per cycle\nG) 0.0201 joules per cycle\nH) 0.0601 joules per cycle\nI) 0.0351 joules per cycle\nJ) 0.0301 joules per cycle",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "engineering",
+      "ground_truth": "F",
+      "id": "mmlu_pro_test_11298",
+      "question": "A 15-hp, 220-volt, 1800-r/min shunt motor has an efficiency of87 per cent at full load. The resistance of the field is 440 ohms.Calculate the (a) Full-load armature current. (b) Torque of the machine.\n\nA) 54 amps, 38 lb. ft\nB) 56 amps, 46 lb. ft\nC) 61 amps, 47 lb. ft\nD) 58 amps, 44 lb. ft\nE) 59 amps, 42 lb. ft\nF) 57.96 amps, 43.77 lb. ft\nG) 55 amps, 40 lb. ft\nH) 53.5 amps, 41.5 lb. ft\nI) 60 amps, 45 lb. ft\nJ) 52 amps, 39 lb. ft",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "engineering",
+      "ground_truth": "E",
+      "id": "mmlu_pro_test_11299",
+      "question": "(i) How much energy is used by a 1,500-watt heater in 8 hr? (ii) A 12-kw load is supplied from a line that has a resistance of 0.1 ohm in each conductor. Find the line loss in watts when the load is supplied at (a) 120 volts and (b) 240 volts.\n\nA) 9kwhr, 1440 watts, 720 watts\nB) 14kwhr, 2100 watts, 300 watts\nC) 11kwhr, 1800 watts, 450 watts\nD) 15kwhr, 2500 watts, 400 watts\nE) 12kwhr, 2000 watts, 500 watts\nF) 10kwhr, 1500 watts, 600 watts\nG) 11.5kwhr, 1900 watts, 520 watts\nH) 12kwhr, 2200 watts, 440 watts\nI) 12.5kwhr, 1700 watts, 560 watts\nJ) 13kwhr, 1600 watts, 480 watts",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "engineering",
+      "ground_truth": "B",
+      "id": "mmlu_pro_test_11300",
+      "question": "A rectangular waveguide, 5 cm by 2.5 cm, has an air dielectric. At an excitation frequency of 4000 megacycles, determinethe propagation constants of the 10, 01, 20, 11, 02, and 55 modes.Assume perfect conductors.\n\nA) j78.5 for the 10 mode, 120.6 for the 01 and 20 modes, 155 for the 11 mode, 250 for the 02 mode, and 720 for the 55 mode\nB) j55.4 for the 10 mode, 93.8 for the 01 and 20 modes, 113 for the 11 mode, 237 for the 02 mode, and 697 for the 55 mode\nC) j62.7 for the 10 mode, 95.4 for the 01 and 20 modes, 118 for the 11 mode, 240 for the 02 mode, and 710 for the 55 mode\nD) j70.2 for the 10 mode, 80.5 for the 01 and 20 modes, 130 for the 11 mode, 210 for the 02 mode, and 680 for the 55 mode\nE) j59.6 for the 10 mode, 91.5 for the 01 and 20 modes, 108 for the 11 mode, 245 for the 02 mode, and 675 for the 55 mode\nF) j66.1 for the 10 mode, 87.9 for the 01 and 20 modes, 105 for the 11 mode, 225 for the 02 mode, and 715 for the 55 mode\nG) j50.4 for the 10 mode, 90.8 for the 01 and 20 modes, 120 for the 11 mode, 230 for the 02 mode, and 700 for the 55 mode\nH) j45.3 for the 10 mode, 88.2 for the 01 and 20 modes, 110 for the 11 mode, 220 for the 02 mode, and 690 for the 55 mode\nI) j48.8 for the 10 mode, 102.3 for the 01 and 20 modes, 125 for the 11 mode, 215 for the 02 mode, and 705 for the 55 mode\nJ) j60.3 for the 10 mode, 85.7 for the 01 and 20 modes, 100 for the 11 mode, 200 for the 02 mode, and 650 for the 55 mode",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "engineering",
+      "ground_truth": "B",
+      "id": "mmlu_pro_test_11301",
+      "question": "Using the definition of the bilateral z transform F (z) = ^\\infty\\sum_n=-\\infty f[n] z^-n, find the z - transform of f[n] = 3\\delta [n+2] + 4\\delta [n-1] + 2\\delta [n-3].\n\nA) 3z^-2 + 4z^-1 + 2z^3\nB) 3z^2+ 4z^-1 + 2z^-3\nC) 2z^3 + 4z^-2 + 3z^-1\nD) 4z^2+ 3z^-1 + 2z^-3\nE) 4z^-3 + 3z^-2 + 2z^-1\nF) 3z^2+ 2z^-1 + 4z^-3\nG) 2z^2+ 4z^-1 + 3z^-3\nH) 3z^3 + 4z + 2z^-2\nI) 4z^3 + 2z + 3z^-2\nJ) 2z^-1 + 3z^-3 + 4z^2",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "engineering",
+      "ground_truth": "J",
+      "id": "mmlu_pro_test_11302",
+      "question": "For f(t) = e^-2t u(t), find the initial value and slope both by letting t = 0^+ and from the initial-value theorem.\n\nA) Initial value is 2, slope is -4\nB) Initial value is -1, slope is 2\nC) Initial value is 1, slope is 2\nD) Initial value is 0, slope is undefined\nE) Initial value is 0, slope is 2\nF) Initial value is -1, slope is -2\nG) Initial value is 0, slope is -2\nH) Initial value is 1, slope is undefined\nI) Initial value is 0.5, slope is -1\nJ) Initial value is 1, slope is -2",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "engineering",
+      "ground_truth": "C",
+      "id": "mmlu_pro_test_11303",
+      "question": "The flux-distribution curve of a synchronous machine is representedat no-load by B_x= 100 sin (x/\\tau) \\pi - 14 sin 3 (x/\\tau) \\pi - 20 sin 5 (x/\\tau) \\pi + 1 sin 7 (x/\\tau) \\pi. Determine theemfsinduced at no-load by the harmonics (asfractions of the fundamental).\n\nA) (E_3 / E_1) = 0.1, (E_5 / E_1) = 0.02, (E_7 / E_1) = 0.004\nB) (E_3 / E_1) = 0.00072, (E_5 / E_1) = 0.01435, (E_7 / E_1) = 0.075\nC) (E_3 / E_1) = 0.075, (E_5 / E_1) = 0.01435, (E_7 / E_1) = 0.00072\nD) (E_3 / E_1) = 0.05, (E_5 / E_1) = 0.01, (E_7 / E_1) = 0.002\nE) (E_3 / E_1) = 0.03, (E_5 / E_1) = 0.006, (E_7 / E_1) = 0.0012\nF) (E_3 / E_1) = 0.01435, (E_5 / E_1) = 0.075, (E_7 / E_1) = 0.00072\nG) (E_3 / E_1) = 0.09, (E_5 / E_1) = 0.018, (E_7 / E_1) = 0.0009\nH) (E_3 / E_1) = 0.00072, (E_5 / E_1) = 0.075, (E_7 / E_1) = 0.01435\nI) (E_3 / E_1) = 0.06, (E_5 / E_1) = 0.012, (E_7 / E_1) = 0.0024\nJ) (E_3 / E_1) = 0.02, (E_5 / E_1) = 0.04, (E_7 / E_1) = 0.008",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "engineering",
+      "ground_truth": "A",
+      "id": "mmlu_pro_test_11304",
+      "question": "A plane 1,000 Mc/sec traveling wave in air with peak electric field intensity of 1 volt/meter is incident normally on a large copper sheet. Find the average power absorbed by the sheet per square meter of area.\n\nA) 1.16 × 10^-7 watt/meter^2\nB) 2.32 × 10^-7 watt/meter^2\nC) 9.65 × 10^-7 watt/meter^2\nD) 5.80 × 10^-8 watt/meter^2\nE) 1.16 × 10^-5 watt/meter^2\nF) 1.16 × 10^-8 watt/meter^2\nG) 4.64 × 10^-5 watt/meter^2\nH) 5.00 × 10^-6 watt/meter^2\nI) 1.16 × 10^-6 watt/meter^2\nJ) 2.34 × 10^-5 watt/meter^2",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    },
+    {
+      "category": "engineering",
+      "ground_truth": "B",
+      "id": "mmlu_pro_test_11305",
+      "question": "The ѵ -irelation of a nonlinear resistor is given by ѵ (t) = (1/2)i^2 (t) Is this resistor voltage-controlled? Current-controlled?\n\nA) The resistor is controlled by the square root of the current\nB) The resistor is current controlled\nC) The resistor is both voltage and current controlled\nD) The resistor control depends on the frequency of the input signal\nE) The resistor is controlled by the cube of the current\nF) The resistor is voltage controlled\nG) The resistor control mechanism changes with temperature\nH) The resistor is controlled by the inverse of the current\nI) The resistor is controlled by the square of the voltage\nJ) The resistor is not controlled",
+      "source": "TIGER-Lab/MMLU-Pro:test"
+    }
+  ],
+  "seed": 20260813,
+  "source_url": "https://huggingface.co/datasets/TIGER-Lab/MMLU-Pro",
+  "split": "test"
+}

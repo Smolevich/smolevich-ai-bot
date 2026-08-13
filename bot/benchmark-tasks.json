@@ -1,15 +1,36 @@
 {
-  "version": 1,
+  "version": 2,
+  "suite_started_at": "2026-08-13",
   "native": [
     {
-      "id": "gsm8k_native",
-      "kind": "gsm8k_numeric",
-      "samples_per_run": 5,
-      "dataset": "gsm8k.json",
+      "id": "mmlu_pro_v2",
+      "kind": "mcq_letter",
+      "samples_per_run": 10,
+      "dataset": "mmlu_pro.json",
       "license": "MIT",
-      "source_url": "https://huggingface.co/datasets/openai/gsm8k",
+      "source_url": "https://huggingface.co/datasets/TIGER-Lab/MMLU-Pro",
       "max_tokens": 1536,
-      "prompt_suffix": "Реши задачу пошагово, а в конце выведи ровно одну строку: ANSWER: <число>"
+      "prompt_suffix": "Выбери один вариант. Рассуждай кратко, а последней строкой выведи ровно: ANSWER: <буква>"
+    },
+    {
+      "id": "math500_int_v2",
+      "kind": "math_numeric",
+      "samples_per_run": 5,
+      "dataset": "math500_int.json",
+      "license": "MIT (Hendrycks MATH)",
+      "source_url": "https://huggingface.co/datasets/HuggingFaceH4/MATH-500",
+      "max_tokens": 2048,
+      "prompt_suffix": "Реши задачу. Рассуждай кратко, а последней строкой выведи ровно: ANSWER: <целое число>"
+    },
+    {
+      "id": "ifeval_short_v2",
+      "kind": "ifeval_constraints",
+      "samples_per_run": 5,
+      "dataset": "ifeval.json",
+      "license": "Apache-2.0",
+      "source_url": "https://huggingface.co/datasets/google/IFEval",
+      "max_tokens": 1024,
+      "prompt_suffix": ""
     }
   ],
   "claude": [

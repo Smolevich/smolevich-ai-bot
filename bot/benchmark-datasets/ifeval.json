@@ -1,0 +1,661 @@
+{
+  "config": "default",
+  "dataset": "google/IFEval",
+  "fetched_at": "2026-08-13T11:42:11Z",
+  "license": "Apache-2.0",
+  "samples": [
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "keywords:forbidden_words"
+        ],
+        "kwargs": [
+          {
+            "forbidden_words": [
+              "yes",
+              "no"
+            ]
+          }
+        ]
+      },
+      "id": "ifeval_train_190",
+      "question": "Are the weather conditions in the Arctic very cold most of the year? Do not say 'yes' or 'no' throughout your entire response.",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "keywords:forbidden_words"
+        ],
+        "kwargs": [
+          {
+            "forbidden_words": [
+              "enzymes",
+              "antibodies"
+            ]
+          }
+        ]
+      },
+      "id": "ifeval_train_191",
+      "question": "Write a summary of the following text in a funny way: \"The 2018 Nobel Prize in Chemistry has been awarded to Frances Arnold, George P. Smith and Gregory P. Winter for their work on directed evolution. Arnold was awarded half of the prize for her work on the directed evolution of enzymes, while Smith and Winter shared the other half for their work on the directed evolution of antibodies.\"\n\nDo not include \"enzymes\" and \"antibodies\" in your response.",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "length_constraints:number_words",
+          "length_constraints:number_words"
+        ],
+        "kwargs": [
+          {
+            "num_words": 100,
+            "relation": "at least"
+          },
+          {
+            "num_words": 121,
+            "relation": "less than"
+          }
+        ]
+      },
+      "id": "ifeval_train_195",
+      "question": "A psychologist is a professional who examines people's behaviors and mental processes. Can you tell me more about psychologists? Answer in 100 to 120 words.",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "detectable_content:postscript"
+        ],
+        "kwargs": [
+          {
+            "postscript_marker": "P.S."
+          }
+        ]
+      },
+      "id": "ifeval_train_196",
+      "question": "Could you give me a table of pros and cons of juvenile detention? Add a postscript that starts with P.S. at the end.",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "detectable_format:number_bullet_lists"
+        ],
+        "kwargs": [
+          {
+            "num_bullets": 1
+          }
+        ]
+      },
+      "id": "ifeval_train_198",
+      "question": "Write a riddle about a mongoose that includes exactly one bullet point. Make sure to include a few bullet points indicated by *, such as:\n* Bullet point",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "detectable_format:title"
+        ],
+        "kwargs": [
+          {}
+        ]
+      },
+      "id": "ifeval_train_201",
+      "question": "Write a 200 word essay on the 2000 presidential election. The title should be wrapped in double angular brackets, i.e. <<title>>.",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "detectable_format:number_bullet_lists",
+          "change_case:english_lowercase"
+        ],
+        "kwargs": [
+          {
+            "num_bullets": 3
+          },
+          {}
+        ]
+      },
+      "id": "ifeval_train_202",
+      "question": "What kind of fashion would Frankenstein's bride wear? Make your answer weird or interesting and use only lowercase letters. Your answer must contain exactly 3 bullet points using the markdown bullet points format, such as:\n* Bullet point 1",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "detectable_content:number_placeholders"
+        ],
+        "kwargs": [
+          {
+            "num_placeholders": 1
+          }
+        ]
+      },
+      "id": "ifeval_train_205",
+      "question": "Write a short and funny joke about a guy who works at the IRS. Include at least one placeholder represented by square brackets.",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "keywords:forbidden_words",
+          "detectable_content:number_placeholders"
+        ],
+        "kwargs": [
+          {
+            "forbidden_words": [
+              "sad",
+              "crazy",
+              "stress"
+            ]
+          },
+          {
+            "num_placeholders": 15
+          }
+        ]
+      },
+      "id": "ifeval_train_284",
+      "question": "Write a college academic paper about President of the United States being stressed. Make sure not to include negative words such as 'sad', 'crazy', 'stress', etc., in the response. Also, make sure to include at least 15 placeholders represented by square brackets, such as [address].",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "keywords:existence"
+        ],
+        "kwargs": [
+          {
+            "keywords": [
+              "ink",
+              "memoirs"
+            ]
+          }
+        ]
+      },
+      "id": "ifeval_train_287",
+      "question": "Please rewrite the following sentence in a serious tone, similar to the president of the united states, and without an upward bias or inflation alarmism. Please also include the keywords \"ink\" and \"memoirs\" in the sentence: \"The main points to consider are the following: First, the ECB’s own forecasts, which currently have a strong upward bias, must be revised downwards. Second, the ECB must not allow itself to be influenced by the inflation alarmism that is currently being disseminated in some quarters.\"",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "detectable_format:number_highlighted_sections",
+          "startend:quotation"
+        ],
+        "kwargs": [
+          {
+            "num_highlights": 1
+          },
+          {}
+        ]
+      },
+      "id": "ifeval_train_288",
+      "question": "Give me a logical question about chatting and conquering. Make it interesting. Highlight at least one section of your answer with markdown, i.e. *highlighted section*. Put your entire response inside double quotation marks.",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "detectable_format:number_highlighted_sections"
+        ],
+        "kwargs": [
+          {
+            "num_highlights": 1
+          }
+        ]
+      },
+      "id": "ifeval_train_291",
+      "question": "Gideon is a farmer who has a surplus of crops from his farm this year. What might he do with that surplus? Highlight at least one section of your answer in markdown, i.e *highlighted section*.",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "change_case:english_lowercase"
+        ],
+        "kwargs": [
+          {}
+        ]
+      },
+      "id": "ifeval_train_292",
+      "question": "Write a professional haiku in English for moms about an inspirational chorus teacher. It should include the phrase \"singing is life\" and be in all lowercase letters. No capital letters are allowed.",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "change_case:english_lowercase"
+        ],
+        "kwargs": [
+          {}
+        ]
+      },
+      "id": "ifeval_train_293",
+      "question": "Create a product description for a product that will help me to stop snoring. Use all lowercase letters.",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "startend:quotation"
+        ],
+        "kwargs": [
+          {}
+        ]
+      },
+      "id": "ifeval_train_294",
+      "question": "Write an email to your friend about what triggers you. Make sure to wrap the entire email in double quotation marks.",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "keywords:forbidden_words"
+        ],
+        "kwargs": [
+          {
+            "forbidden_words": [
+              "schlau"
+            ]
+          }
+        ]
+      },
+      "id": "ifeval_train_295",
+      "question": "Translate the following sentence into German and then criticize it: Werner was a good friend of mine, but not very smart.\nAvoid the word \"schlau\" throughout your response.",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "change_case:english_capital"
+        ],
+        "kwargs": [
+          {}
+        ]
+      },
+      "id": "ifeval_train_297",
+      "question": "Rewrite the following text so that it is funny to software engineers using notations from the book \"The C Programming Language\": \"The use of the various constructions described in this chapter is one of the most distinctive features of the C programming language.\" Make this sound like it is being said by the president of the United States and capitalize every letter.",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "keywords:existence"
+        ],
+        "kwargs": [
+          {
+            "keywords": [
+              "finale",
+              "less"
+            ]
+          }
+        ]
+      },
+      "id": "ifeval_train_298",
+      "question": "Write a blog post about how to train a dog that is geared towards kids. Include the keywords \"finale\" and \"less\" in the post.",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "change_case:english_capital"
+        ],
+        "kwargs": [
+          {}
+        ]
+      },
+      "id": "ifeval_train_465",
+      "question": "Write a story about a family that goes camping in the woods. Your entire response should be in English and in all capital letters.",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "keywords:existence"
+        ],
+        "kwargs": [
+          {
+            "keywords": [
+              "bill",
+              "economist",
+              "jurgen"
+            ]
+          }
+        ]
+      },
+      "id": "ifeval_train_471",
+      "question": "Write an HTML page that lists 25 limericks about people named \"Bill\". The page should include keywords 'economist', 'bill', and 'jurgen'",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "length_constraints:number_words",
+          "detectable_format:title"
+        ],
+        "kwargs": [
+          {
+            "num_words": 20,
+            "relation": "less than"
+          },
+          {}
+        ]
+      },
+      "id": "ifeval_train_472",
+      "question": "What is the answer to the riddle that asks what you can catch but not throw, and what you can throw but not catch? The entire reply must be less than 20 words and contain a title in double angular brackets, i.e. <<title>>.",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "keywords:forbidden_words"
+        ],
+        "kwargs": [
+          {
+            "forbidden_words": [
+              "computer",
+              "science"
+            ]
+          }
+        ]
+      },
+      "id": "ifeval_train_473",
+      "question": "How to tell others that your major is computer science, without saying the word computer or science? You entire response should not contain the word computer and science.",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "detectable_format:number_highlighted_sections"
+        ],
+        "kwargs": [
+          {
+            "num_highlights": 5
+          }
+        ]
+      },
+      "id": "ifeval_train_474",
+      "question": "Summarize the history of Japan. Italicize at least 5 keywords in your response. To indicate a italic word, wrap it with asterisk, like *italic*",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "detectable_format:number_highlighted_sections",
+          "change_case:english_capital"
+        ],
+        "kwargs": [
+          {
+            "num_highlights": 5
+          },
+          {}
+        ]
+      },
+      "id": "ifeval_train_476",
+      "question": "Generate a list of 100 random names. Make sure that no name is repeated and every name is unique. All letters in your entire response should be capitalized. Italicize 5 of your favorite names. For example:\n1. *FAVORITE NAME 1*\n2. *FAVORITE NAME 2*\n3. ...",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "keywords:forbidden_words",
+          "punctuation:no_comma"
+        ],
+        "kwargs": [
+          {
+            "forbidden_words": [
+              "name",
+              "song",
+              "person",
+              "man",
+              "woman"
+            ]
+          },
+          {}
+        ]
+      },
+      "id": "ifeval_train_478",
+      "question": "Write a song for the person named 'Guerrero'. Make sure to not include the words 'name', 'song', 'person', 'man', 'woman' throughout your entire output. Also avoid using commas in your entire response.",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "detectable_format:number_highlighted_sections",
+          "length_constraints:number_words"
+        ],
+        "kwargs": [
+          {
+            "num_highlights": 3
+          },
+          {
+            "num_words": 40,
+            "relation": "less than"
+          }
+        ]
+      },
+      "id": "ifeval_train_480",
+      "question": "I want to start a garden for veggies and flowers in my small backyard. Can you give me some advice on how to water my plants? Have at least 3 italic text sections, such as: *italic text 1*, *italic text 2*, etc.\n\nMake your reply short -- the whole reply should contain less than 40 words.",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "detectable_format:number_bullet_lists"
+        ],
+        "kwargs": [
+          {
+            "num_bullets": 6
+          }
+        ]
+      },
+      "id": "ifeval_train_56",
+      "question": "What is the difference between the 13 colonies and the other British colonies in North America? Your answer must contain exactly 6 bullet point in Markdown using the following format:\n* Bullet point one.\n* Bullet point two.\n...\n* Bullet point fix.",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "detectable_format:number_bullet_lists",
+          "change_case:english_lowercase"
+        ],
+        "kwargs": [
+          {
+            "num_bullets": 3
+          },
+          {}
+        ]
+      },
+      "id": "ifeval_train_57",
+      "question": "How did a man named John of Brienne become the King of Jerusalem? Explain in a Zen-like style. Your answer should use all lowercase letters and must also contain exactly 3 bullet points in markdown format. Use * to indicate bullets, like:\n* xyz\n* abc\n* opq",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "detectable_content:postscript",
+          "detectable_format:number_bullet_lists"
+        ],
+        "kwargs": [
+          {
+            "postscript_marker": "P.P.S"
+          },
+          {
+            "num_bullets": 10
+          }
+        ]
+      },
+      "id": "ifeval_train_60",
+      "question": "List exactly 10 possible names for a new baby boy. Then add a postscript starting with P.P.S to the end of your response. Put the names into bullet points that are indicated by:\n* This is an example bullet",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "detectable_format:number_highlighted_sections"
+        ],
+        "kwargs": [
+          {
+            "num_highlights": 15
+          }
+        ]
+      },
+      "id": "ifeval_train_61",
+      "question": "Write an outline for a paper on the history of Yemeni coffee. The outline should include the main points of the paper, and at least 15 sections should be highlighted with markdown such as *highlighted section*.",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "detectable_format:title"
+        ],
+        "kwargs": [
+          {}
+        ]
+      },
+      "id": "ifeval_train_63",
+      "question": "What are the pros and cons of kotlin vs java? Your answer must have a title contained in double angular brackets, such as <<kotlin vs java>>.",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "startend:quotation",
+          "detectable_format:number_bullet_lists"
+        ],
+        "kwargs": [
+          {},
+          {
+            "num_bullets": 8
+          }
+        ]
+      },
+      "id": "ifeval_train_64",
+      "question": "Write a funny article about why the dinosaurs went extinct and put double quotations marks around your whole response. Include exactly 8 bullet points in your response. The bullet points should be in the form of:\n* This is bullet 1\n* This is bullet 2\n...",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "detectable_format:number_bullet_lists",
+          "length_constraints:number_words"
+        ],
+        "kwargs": [
+          {
+            "num_bullets": 9
+          },
+          {
+            "num_words": 100,
+            "relation": "less than"
+          }
+        ]
+      },
+      "id": "ifeval_train_68",
+      "question": "A nucleus is a cluster of protons and neutrons. Elaborate on this. Write exactly 9 very short bullet points. Limit the number of words you use (less than 100 words). An example:\n* A nucleus is a cluster of protons and neutrons\n* A proton is ....\n\nPlease follow the format of the example above.",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "change_case:english_lowercase"
+        ],
+        "kwargs": [
+          {}
+        ]
+      },
+      "id": "ifeval_train_69",
+      "question": "Compose song lyrics about a socio-economic problem. The song should be in English and in all lowercase letters.",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "detectable_content:postscript"
+        ],
+        "kwargs": [
+          {
+            "postscript_marker": "P.P.S"
+          }
+        ]
+      },
+      "id": "ifeval_train_70",
+      "question": "Write an extravagant session plan to learn about java. Make sure to include a postscript starting with P.P.S",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "detectable_content:number_placeholders"
+        ],
+        "kwargs": [
+          {
+            "num_placeholders": 7
+          }
+        ]
+      },
+      "id": "ifeval_train_71",
+      "question": "Draft a blog post about Ripley's Aquarium. Make sure your blog post contains at least 7 placeholders represented by square brackets, such as [location].",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "punctuation:no_comma"
+        ],
+        "kwargs": [
+          {}
+        ]
+      },
+      "id": "ifeval_train_139",
+      "question": "What is the next number in this series: 1, 4, 7, 11, 17? Please answer with only mathematical notation without any commas.",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "detectable_content:postscript"
+        ],
+        "kwargs": [
+          {
+            "postscript_marker": "P.S."
+          }
+        ]
+      },
+      "id": "ifeval_train_142",
+      "question": "How to write a good Chinese poem? At the end of your response, please explicitly add a note starting with \"P.S.\"",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "detectable_format:number_highlighted_sections"
+        ],
+        "kwargs": [
+          {
+            "num_highlights": 1
+          }
+        ]
+      },
+      "id": "ifeval_train_143",
+      "question": "Write a song about the summers of my childhood that I spent in the countryside. Give the song a name, and highlight the name by wrapping it with *. For example: *little me in the countryside*.",
+      "source": "google/IFEval:train"
+    },
+    {
+      "ground_truth": {
+        "instruction_ids": [
+          "startend:quotation"
+        ],
+        "kwargs": [
+          {}
+        ]
+      },
+      "id": "ifeval_train_144",
+      "question": "The Jimenez family has 20 members. Each member has at least one pet. If there are 32 pets in total, what is the maximum number of members that can possibly have 3 pets? Solve this step by step, and wrap your entire response (reasoning process and the final answer) with double quotation marks.",
+      "source": "google/IFEval:train"
+    }
+  ],
+  "seed": 20260813,
+  "source_url": "https://huggingface.co/datasets/google/IFEval",
+  "split": "train"
+}
