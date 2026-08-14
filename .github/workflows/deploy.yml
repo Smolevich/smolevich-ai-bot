@@ -225,6 +225,9 @@ jobs:
               sudo systemctl daemon-reload
               sudo systemctl enable smolevich-bench-worker
               sudo systemctl restart smolevich-bench-worker
+              # Idempotent: recreates the 07:00/19:00 schedule so it survives a rebuild.
+              (cd "$APP_DIR/worker" && set -a && . "$APP_DIR/.env" && set +a \
+                && sudo -E ./.venv/bin/python -m temporal_jobs.schedule) || echo "WARN: schedule setup failed"
             else
               echo "TEMPORAL_* отсутствуют — воркер бенчмарка выключен, работает cron"
               sudo systemctl disable --now smolevich-bench-worker 2>/dev/null || true
