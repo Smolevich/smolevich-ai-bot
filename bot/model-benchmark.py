@@ -1079,7 +1079,7 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
     ranked.sort(key=leaderboard_sort_key, reverse=True)
     # A board of four, one per provider, threw away three quarters of what was measured
     # and hid the case where one provider holds the two best models. Cap by --limit instead.
-    limit = max(1, int(getattr(args, "limit", 0) or 30))
+    limit = max(1, int(getattr(args, "limit", 0) or 10))
     models = []
     for idx, item in enumerate(ranked[:limit], start=1):
         m = item["model"]
@@ -1217,7 +1217,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     leaderboard = sub.add_parser("leaderboard", help="Build or publish leaderboard / methodology payload")
     leaderboard.add_argument("--lookback-hours", type=int, default=DEFAULT_LOOKBACK_BENCH_HOURS)
-    leaderboard.add_argument("--limit", type=int, default=30)
+    # Ten is what a person reads. Everything below it is measured but not shown.
+    leaderboard.add_argument("--limit", type=int, default=10)
     leaderboard.add_argument("--include-unbenchmarked", action="store_true")
     leaderboard.add_argument("--publish", action="store_true")
     leaderboard.add_argument("--publish-tasks", action="store_true")

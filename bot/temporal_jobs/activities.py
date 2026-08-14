@@ -145,7 +145,7 @@ def run_claude_job(ref: JobRef) -> JobOutcome:
 @activity.defn
 def publish_leaderboard() -> dict:
     mb = bench()
-    args = bench_args(limit=30, include_unbenchmarked=False)
+    args = bench_args(limit=10, include_unbenchmarked=False)
     payload = mb.leaderboard_payload(args)
     if os.environ.get("MODEL_LEADERBOARD_TOKEN"):
         mb.publish(mb.LEADERBOARD_ENDPOINT, payload)

@@ -56,7 +56,9 @@ class ProviderLaneWorkflow:
                     run_native_job,
                     ref,
                     start_to_close_timeout=timedelta(seconds=90),
-                    schedule_to_close_timeout=timedelta(minutes=15),
+                    # Pauses plus four retries backing off to three minutes do not fit in
+                    # fifteen; 14 openrouter samples were cancelled on that ceiling.
+                    schedule_to_close_timeout=timedelta(minutes=40),
                     retry_policy=RETRY,
                 )
                 for ref in chunk
