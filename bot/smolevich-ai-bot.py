@@ -1777,6 +1777,7 @@ def build_leaderboard_view(is_en=False):
 
     lines = ["🏆 Free models — how they do" if is_en else "🏆 Бесплатные модели — как справляются"]
     kb = []
+    row = []
     for i, e in enumerate(entries, start=1):
         model = e.get("model") or ""
         provider = (e.get("provider") or "").strip()
@@ -1789,11 +1790,20 @@ def build_leaderboard_view(is_en=False):
         lines.append(f"{i}. {short} · {provider}\n   {verdict}")
         code = PROVIDER_CODES.get(provider.lower())
         if code and model:
-            kb.append([{"text": (f"Try {short}" if is_en else f"Попробовать {short}"),
-                        "callback_data": f"try:{code}:{model}"}])
+            # Numbered buttons, three per row: ten full-width "Try <model>" rows filled the
+            # whole screen and pushed the list itself out of view.
+            row.append({"text": f"{i}", "callback_data": f"try:{code}:{model}"})
+            if len(row) == 3:
+                kb.append(row)
+                row = []
+    if row:
+        kb.append(row)
     updated = (payload or {}).get("updatedAt") or ""
     if updated[:10]:
         lines.append(("\nMeasured " if is_en else "\nЗамерено ") + updated[:10])
+    if kb:
+        lines.append("\nTap a number to chat with that model." if is_en
+                     else "\nНажми номер — отвечу этой моделью.")
     kb.append([{"text": ("← Back" if is_en else "← Назад"), "callback_data": "menu:back"}])
     return "\n".join(lines), kb
 
