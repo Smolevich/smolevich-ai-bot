@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Model health checker — runs via cron, tests LLM provider models and writes results to SQLite."""
+"""Model health checker — runs via cron, tests LLM provider models and writes results to SQLite.
+
+A provider whose free tier ends answers a terminal code on every model. Such a provider is
+parked for 24h and knocked on with a single model per run instead of the full sweep.
+"""
 import json
 import logging
 import os
@@ -10,10 +14,14 @@ import sys
 import time
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import NamedTuple, Sequence
 
 DB_FILE = "/var/lib/telegram-llm-bot.db"
 PROXY_FILE = "/etc/socks-monitor/.proxy_url"
+CONFIG_FILE = os.environ.get("BOT_CONFIG", "/etc/socks-monitor/config.json")
+ADMIN_FILE = os.environ.get("BOT_ADMIN_FILE", "/etc/socks-monitor/.admin_id")
 
 
 def _resolve_proxy():
@@ -36,6 +44,15 @@ HEALTH_CHECK_MAX_TOKENS = 10
 HEALTH_CHECK_TIMEOUT = 30
 WORKERS = 10
 OPENROUTER_DELAY_SEC = 1.5
+
+# 401/402/403 is the provider saying "not for you any more". 429 and 5xx say "not right now",
+# and a network error says nothing about the provider at all — neither may park anyone.
+TERMINAL_HTTP_CODES = frozenset({401, 402, 403})
+DEAD_RUN_TERMINAL_SHARE = 0.9
+DEAD_RUNS_BEFORE_DISABLE = 3
+DISABLE_SEC = 24 * 3600
+PROBE_LOOKBACK_SEC = 7 * 86400
+TEXTUAL_CATEGORIES = ("text", "code")
 
 PROVIDERS = {
     "openrouter": {
@@ -85,6 +102,71 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger(__name__)
 
 
+class ModelProbe(NamedTuple):
+    """Result of knocking on one model."""
+    model_id: str
+    latency_ms: int
+    available: bool
+    supports_tools: bool
+    category: str
+    error: str | None = None
+    rate_limited: bool = False
+    http_code: int | None = None
+    message: str = ""
+
+
+class ProviderState(NamedTuple):
+    """Backoff state of one provider, mirroring the provider_state row."""
+    disabled_until: int = 0
+    reason: str = ""
+    consecutive_dead_runs: int = 0
+    updated_ts: int = 0
+
+
+def shutdown_evidence(probes: Sequence[ModelProbe]) -> tuple[int, str] | None:
+    """(code, provider message) if this run looks like the provider closed the door, else None.
+
+    Closed means: nothing answered, and nearly every attempt came back with a terminal code.
+    A run where anything still works, or where the failures are 429/5xx/network, proves nothing.
+    """
+    attempts = [p for p in probes if p.category in TEXTUAL_CATEGORIES]
+    if not attempts:
+        return None
+    if any(p.available for p in attempts):
+        return None
+    terminal = [p for p in attempts if p.http_code in TERMINAL_HTTP_CODES]
+    if len(terminal) / len(attempts) < DEAD_RUN_TERMINAL_SHARE:
+        return None
+    codes = [p.http_code for p in terminal]
+    code = max(set(codes), key=codes.count)
+    message = next((p.message for p in terminal if p.http_code == code and p.message), "")
+    return code, message
+
+
+def next_state_after_run(prev: ProviderState, probes: Sequence[ModelProbe], now: int) -> tuple[ProviderState, str]:
+    """New state and event ("disabled" | "recovered" | "") after a full sweep."""
+    attempts = len([p for p in probes if p.category in TEXTUAL_CATEGORIES])
+    evidence = shutdown_evidence(probes)
+    if evidence is None:
+        if not attempts:
+            return prev, ""
+        event = "recovered" if prev.disabled_until > now else ""
+        return ProviderState(0, "", 0, now), event
+    code, message = evidence
+    runs = prev.consecutive_dead_runs + 1
+    if runs < DEAD_RUNS_BEFORE_DISABLE or prev.disabled_until > now:
+        return ProviderState(prev.disabled_until, prev.reason, runs, now), ""
+    reason = f"HTTP {code} on all {attempts} models: {message}".strip()[:300]
+    return ProviderState(now + DISABLE_SEC, reason, runs, now), "disabled"
+
+
+def next_state_after_probe(prev: ProviderState, probe: ModelProbe | None, now: int) -> tuple[ProviderState, str]:
+    """New state and event after the single knock that replaces the sweep while parked."""
+    if probe is not None and probe.available:
+        return ProviderState(0, "", 0, now), "recovered"
+    return ProviderState(prev.disabled_until, prev.reason, prev.consecutive_dead_runs, now), ""
+
+
 def categorize_model(model_id):
     mid = model_id.lower()
     for cat, keywords in _CAT_RULES:
@@ -114,6 +196,14 @@ def capabilities_for_category(category):
 def load_key(provider_name):
     try:
         return Path(PROVIDERS[provider_name]["key_file"]).read_text().strip()
+    except Exception:
+        return ""
+
+
+def read_error_body(err: urllib.error.HTTPError, limit: int = 200) -> str:
+    """The provider's own words — the only place that says *why* the door is shut."""
+    try:
+        return " ".join(err.read().decode("utf-8", errors="ignore").split())[:limit]
     except Exception:
         return ""
 
@@ -164,15 +254,15 @@ def _carry_or_set_availability(conn, prov_name, model_id, fresh_available, rate_
 
 
 def check_model(prov_name, prov, api_key, model_id):
-    """Check a single model. Returns (model_id, latency_ms, available, supports_tools, category, error, rate_limited).
+    """Check a single model, returning a ModelProbe.
 
     rate_limited=True means the probe hit HTTP 429 and the model's `available` flag should be left as it was —
     a temporary key-quota exhaustion is not the same as the model being broken."""
     category = categorize_model(model_id)
     if category == "audio":
-        return (model_id, 0, False, prov.get("supports_tools", False), "audio", None, False)
+        return ModelProbe(model_id, 0, False, prov.get("supports_tools", False), "audio")
     if category not in ("text", "code"):
-        return (model_id, 0, False, prov.get("supports_tools", False), category, None, False)
+        return ModelProbe(model_id, 0, False, prov.get("supports_tools", False), category)
     try:
         opener = make_opener(prov.get("proxy", False))
         timeout = prov.get("health_timeout", HEALTH_CHECK_TIMEOUT)
@@ -189,16 +279,16 @@ def check_model(prov_name, prov, api_key, model_id):
             json.loads(f.read().decode())
             latency = int((time.time() - start) * 1000)
             log.info(f"  ✅ {model_id}: {latency}ms")
-            return (model_id, latency, True, prov.get("supports_tools", False), category, None, False)
+            return ModelProbe(model_id, latency, True, prov.get("supports_tools", False), category)
     except urllib.error.HTTPError as e:
         err = f"HTTP Error {e.code}: {e.reason}"
         rate_limited = (e.code == 429)
         log.info(f"  {'⏸' if rate_limited else '❌'} {model_id}: {err}")
-        return (model_id, 0, False, False, category, err, rate_limited)
+        return ModelProbe(model_id, 0, False, False, category, err, rate_limited, e.code, read_error_body(e))
     except Exception as e:
         err = str(e)[:200]
         log.info(f"  ❌ {model_id}: {e}")
-        return (model_id, 0, False, False, category, err, False)
+        return ModelProbe(model_id, 0, False, False, category, err)
 
 
 def fetch_openrouter_model_list(prov):
@@ -220,7 +310,143 @@ def fetch_openrouter_model_list(prov):
     return result
 
 
+def load_provider_state(conn, prov_name) -> ProviderState:
+    try:
+        row = conn.execute(
+            "SELECT disabled_until, reason, consecutive_dead_runs, updated_ts FROM provider_state WHERE provider = ?",
+            (prov_name,)).fetchone()
+    except Exception as e:
+        log.error(f"load_provider_state({prov_name}): {e}")
+        return ProviderState()
+    if not row:
+        return ProviderState()
+    return ProviderState(row[0] or 0, row[1] or "", row[2] or 0, row[3] or 0)
+
+
+def save_provider_state(conn, prov_name, state: ProviderState) -> None:
+    try:
+        conn.execute(
+            """INSERT INTO provider_state (provider, disabled_until, reason, consecutive_dead_runs, updated_ts)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(provider) DO UPDATE SET
+                   disabled_until=excluded.disabled_until,
+                   reason=excluded.reason,
+                   consecutive_dead_runs=excluded.consecutive_dead_runs,
+                   updated_ts=excluded.updated_ts""",
+            (prov_name, state.disabled_until, state.reason, state.consecutive_dead_runs, state.updated_ts))
+        conn.commit()
+    except Exception as e:
+        log.error(f"save_provider_state({prov_name}): {e}")
+
+
+def notify_admin(text: str) -> None:
+    """Best-effort note to the admin. No token on this host is normal — stay quiet then."""
+    try:
+        cfg = json.loads(Path(CONFIG_FILE).read_text())
+        token = Path(cfg["bot_token_file"]).read_text().strip()
+        admin_id = int(Path(ADMIN_FILE).read_text().strip())
+    except Exception:
+        return
+    if not token or not admin_id:
+        return
+    try:
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json.dumps({"chat_id": admin_id, "text": text}).encode(),
+            {"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=15):
+            pass
+    except Exception as e:
+        log.warning(f"admin notify failed: {e}")
+
+
+def announce(prov_name: str, state: ProviderState, event: str) -> None:
+    if event == "disabled":
+        until = datetime.fromtimestamp(state.disabled_until, timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        log.warning(f"{prov_name}: shut its door ({state.reason}) — parked until {until}, one probe per run")
+        notify_admin(f"🚫 {prov_name} убран из обстрела до {until}\n{state.reason}\n"
+                     f"Проверяю одной моделью раз в прогон.")
+    elif event == "recovered":
+        log.info(f"{prov_name}: answering again — back in the full sweep")
+        notify_admin(f"✅ {prov_name} снова отвечает — возвращён в полный обстрел.")
+
+
+def apply_run_state(conn, prov_name, probes, prev: ProviderState, now: int) -> None:
+    """Fold one full sweep into provider_state — one log line per run, not per model."""
+    state, event = next_state_after_run(prev, probes, now)
+    if (state.disabled_until, state.reason, state.consecutive_dead_runs) == \
+            (prev.disabled_until, prev.reason, prev.consecutive_dead_runs):
+        return
+    save_provider_state(conn, prov_name, state)
+    if event:
+        announce(prov_name, state, event)
+    else:
+        log.info(f"{prov_name}: dead-run streak {prev.consecutive_dead_runs} → "
+                 f"{state.consecutive_dead_runs}/{DEAD_RUNS_BEFORE_DISABLE}")
+
+
+def pick_probe_model(conn, prov_name) -> str | None:
+    """Fastest model from the provider's last living sweep; any known model if none ever lived.
+
+    The category join matters: the audio and media crons log into the same table, and an audio
+    model would fail this text probe forever and never let the provider back in.
+    """
+    since = int(time.time()) - PROBE_LOOKBACK_SEC
+    try:
+        row = conn.execute(
+            "SELECT l.model_id FROM model_health_log l "
+            "JOIN model_health h ON h.provider = l.provider AND h.model_id = l.model_id "
+            "WHERE l.provider = ? AND l.available = 1 AND l.ts >= ? AND h.category IN ('text', 'code') "
+            "ORDER BY l.ts DESC, l.latency_ms ASC LIMIT 1", (prov_name, since)).fetchone()
+        if row:
+            return row[0]
+        row = conn.execute(
+            "SELECT model_id FROM model_health WHERE provider = ? AND category IN ('text', 'code') "
+            "ORDER BY model_id LIMIT 1", (prov_name,)).fetchone()
+        if row:
+            return row[0]
+    except Exception as e:
+        log.error(f"pick_probe_model({prov_name}): {e}")
+    try:
+        for mid in fetch_models(prov_name):
+            if categorize_model(mid) in TEXTUAL_CATEGORIES:
+                return mid
+    except Exception as e:
+        log.error(f"pick_probe_model fetch({prov_name}): {e}")
+    return None
+
+
+def probe_parked_provider(conn, prov_name, prev: ProviderState, now: int) -> None:
+    """One knock instead of ~130 — the whole point of parking a provider that shut its door."""
+    left_min = max(0, (prev.disabled_until - now) // 60)
+    api_key = load_key(prov_name)
+    model_id = pick_probe_model(conn, prov_name) if api_key else None
+    if not model_id:
+        log.info(f"{prov_name}: parked for another {left_min} min, no model to probe")
+        return
+    probe = check_model(prov_name, PROVIDERS[prov_name], api_key, model_id)
+    conn.execute(
+        "INSERT INTO model_health_log (ts, provider, model_id, latency_ms, available, error) VALUES (?, ?, ?, ?, ?, ?)",
+        (now, prov_name, model_id, probe.latency_ms, 1 if probe.available else 0, probe.error))
+    conn.commit()
+    state, event = next_state_after_probe(prev, probe, now)
+    save_provider_state(conn, prov_name, state)
+    if event:
+        announce(prov_name, state, event)
+    else:
+        log.info(f"{prov_name}: parked for another {left_min} min, probe {model_id} → {probe.error}")
+
+
 def check_provider(conn, prov_name, openrouter_delay_sec=OPENROUTER_DELAY_SEC):
+    started = int(time.time())
+    prev = load_provider_state(conn, prov_name)
+    if prev.disabled_until > started:
+        probe_parked_provider(conn, prov_name, prev, started)
+        return
+    return sweep_provider(conn, prov_name, prev, openrouter_delay_sec)
+
+
+def sweep_provider(conn, prov_name, prev, openrouter_delay_sec=OPENROUTER_DELAY_SEC):
     if prov_name == "openrouter":
         prov = PROVIDERS[prov_name]
         api_key = load_key(prov_name)
@@ -244,31 +470,32 @@ def check_provider(conn, prov_name, openrouter_delay_sec=OPENROUTER_DELAY_SEC):
         for i, mid in enumerate(models):
             result = check_model(prov_name, prov_copy, api_key, mid)
             results.append(result)
-            if result[6]:  # rate_limited
+            if result.rate_limited:
                 throttled += 1
-            elif result[2]:  # available
+            elif result.available:
                 ok += 1
-            elif result[4] in ("text", "code"):  # category
+            elif result.category in TEXTUAL_CATEGORIES:
                 fail += 1
             if i < len(models) - 1 and openrouter_delay_sec > 0:
                 time.sleep(openrouter_delay_sec)
 
         # Phase 2: batch commit all results in a single short transaction.
         now = int(time.time())
-        for model_id, latency, available, _, category, error, rate_limited in results:
-            if category not in ("text", "code"):
+        for p in results:
+            if p.category not in TEXTUAL_CATEGORIES:
                 continue
-            supports_tools = tools_map.get(model_id, prov.get("supports_tools", False))
-            effective_available = _carry_or_set_availability(conn, prov_name, model_id, available, rate_limited)
+            supports_tools = tools_map.get(p.model_id, prov.get("supports_tools", False))
+            effective_available = _carry_or_set_availability(conn, prov_name, p.model_id, p.available, p.rate_limited)
             conn.execute(
                 "INSERT OR REPLACE INTO model_health (provider, model_id, latency_ms, available, supports_tools, category, capabilities, last_check) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (prov_name, model_id, latency, effective_available,
-                 1 if supports_tools else 0, category, capabilities_for_category(category), now))
+                (prov_name, p.model_id, p.latency_ms, effective_available,
+                 1 if supports_tools else 0, p.category, capabilities_for_category(p.category), now))
             conn.execute(
                 "INSERT INTO model_health_log (ts, provider, model_id, latency_ms, available, error) VALUES (?, ?, ?, ?, ?, ?)",
-                (now, prov_name, model_id, latency, 1 if available else 0, error))
+                (now, prov_name, p.model_id, p.latency_ms, 1 if p.available else 0, p.error))
         conn.commit()
         log.info(f"{prov_name}: {ok} ok, {fail} failed, {throttled} rate-limited (kept prior state)")
+        apply_run_state(conn, prov_name, results, prev, now)
         return
 
     prov = PROVIDERS[prov_name]
@@ -293,29 +520,29 @@ def check_provider(conn, prov_name, openrouter_delay_sec=OPENROUTER_DELAY_SEC):
         for future in as_completed(futures):
             result = future.result()
             results.append(result)
-            model_id, latency, available, supports_tools, category, error, rate_limited = result
-            if rate_limited:
+            if result.rate_limited:
                 throttled += 1
-            elif available:
+            elif result.available:
                 ok += 1
-            elif category in ("text", "code"):
+            elif result.category in TEXTUAL_CATEGORIES:
                 fail += 1
 
     # Phase 2: batch commit all results in a single short transaction.
     now = int(time.time())
-    for model_id, latency, available, supports_tools, category, error, rate_limited in results:
-        if category not in ("text", "code"):
+    for p in results:
+        if p.category not in TEXTUAL_CATEGORIES:
             continue
-        effective_available = _carry_or_set_availability(conn, prov_name, model_id, available, rate_limited)
+        effective_available = _carry_or_set_availability(conn, prov_name, p.model_id, p.available, p.rate_limited)
         conn.execute(
             "INSERT OR REPLACE INTO model_health (provider, model_id, latency_ms, available, supports_tools, category, capabilities, last_check) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (prov_name, model_id, latency, effective_available,
-             1 if supports_tools else 0, category, capabilities_for_category(category), now))
+            (prov_name, p.model_id, p.latency_ms, effective_available,
+             1 if p.supports_tools else 0, p.category, capabilities_for_category(p.category), now))
         conn.execute(
             "INSERT INTO model_health_log (ts, provider, model_id, latency_ms, available, error) VALUES (?, ?, ?, ?, ?, ?)",
-            (now, prov_name, model_id, latency, 1 if available else 0, error))
+            (now, prov_name, p.model_id, p.latency_ms, 1 if p.available else 0, p.error))
     conn.commit()
     log.info(f"{prov_name}: {ok} ok, {fail} failed, {throttled} rate-limited (kept prior state)")
+    apply_run_state(conn, prov_name, results, prev, now)
 
 
 def main():

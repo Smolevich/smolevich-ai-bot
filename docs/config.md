@@ -21,6 +21,15 @@ All four probe logs rotate daily (or at 50 MB) via `/etc/logrotate.d/model-check
 
 Each bot path can be overridden via the matching `BOT_*` env var.
 
+## Provider backoff
+
+A provider counts as closed when a health-check run finds zero live models **and** at least 90% of
+its attempts came back 401/402/403. A 429, a 5xx or a network error is overload, not closure, and
+never counts. Three such runs in a row (~30 min at the 10-minute cron) park the provider in the
+`provider_state` table for 24 h: it gets one probe per run with its fastest recently-live model
+instead of the full sweep, and the first probe that answers puts it back into the sweep. The admin
+gets one Telegram message when a provider is parked and one when it returns.
+
 ## Environment files (on VDS)
 
 - `/opt/smolevich-ai-bot/.env` — central env file managed by CI/CD.

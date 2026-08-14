@@ -284,6 +284,21 @@ class DB:
             return []
 
     @staticmethod
+    def get_provider_state():
+        """Backoff state per provider: a provider parked by the health check has disabled_until in the future."""
+        try:
+            with DB.connectDb() as conn:
+                rows = conn.execute(
+                    "SELECT provider, disabled_until, reason, consecutive_dead_runs, updated_ts "
+                    "FROM provider_state ORDER BY provider"
+                ).fetchall()
+                return [{"provider": r[0], "disabled_until": r[1] or 0, "reason": r[2] or "",
+                         "consecutive_dead_runs": r[3] or 0, "updated_ts": r[4] or 0} for r in rows]
+        except Exception as e:
+            log.error(f"DB get_provider_state: {e}")
+            return []
+
+    @staticmethod
     def get_healthy_models(provider, category="text", limit=10):
         try:
             with DB.connectDb() as conn:
