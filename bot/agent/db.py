@@ -365,6 +365,21 @@ class DB:
             return None
 
     @staticmethod
+    def log_ui_event(uid, route, arg=""):
+        """A screen opened or a button pressed. Never raise: telemetry must not break a reply."""
+        try:
+            def op():
+                with DB.connectDb() as conn:
+                    conn.execute(
+                        "INSERT INTO ui_events (ts, uid, route, arg) VALUES (?, ?, ?, ?)",
+                        (int(time.time()), uid, str(route)[:60], str(arg or "")[:120]),
+                    )
+                    conn.commit()
+            DB.withRetry(op, "log_ui_event")
+        except Exception as e:
+            log.error(f"DB log_ui_event: {e}")
+
+    @staticmethod
     def log_media_request(uid, provider, model, operation, input_size_bytes=0, output_size_bytes=0, latency_ms=0, ok=False, error=None):
         try:
             def op():

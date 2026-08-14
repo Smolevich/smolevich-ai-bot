@@ -1354,6 +1354,9 @@ def send_tts_audio(token, uid, source_text):
 def handle_callback(cb, token, admin_id):
     uid = cb["from"]["id"]; data = cb.get("data", "")
     log.info(f"Callback from {uid}: {data}")
+    # One place catches every inline press, so no screen can be added without telemetry.
+    route, _, arg = data.partition(":")
+    DB.log_ui_event(uid, route, arg)
     if data.startswith("set_provider:"):
         prov_name = data.split(":", 1)[1]; sess = DB.get_session(uid)
         # An old keyboard may still offer a provider we have since dropped.
@@ -1646,6 +1649,7 @@ def take_pending_tts(uid):
 
 def handle_quick_action(action, uid, token, admin_id):
     """Bottom-keyboard buttons arrive as plain text, not as callbacks."""
+    DB.log_ui_event(uid, "quick", action)
     sess = DB.get_session(uid)
     is_en = sess.get("ui_lang", "ru") == "en"
     if action == "chat":
@@ -1687,6 +1691,7 @@ def handle_quick_action(action, uid, token, admin_id):
 
 def handle_command(uid, username, text, token, admin_id):
     cmd = text.split(maxsplit=1)[0].lower()
+    DB.log_ui_event(uid, "command", cmd)
     sess = DB.get_session(uid)
     if cmd == "/menu" or cmd == "/start":
         sess = DB.get_session(uid)
@@ -1881,6 +1886,8 @@ def ensure_access(uid, username, token, admin_id):
         f"Чтобы начать, подпишись на канал {REQUIRED_CHANNEL} — после этого доступ откроется автоматически. "
         "Или нажми «Запросить доступ» и я отправлю заявку админу."
     )
+    # The gate is where most first-timers stop, so it has to be countable.
+    DB.log_ui_event(uid, "gate", "shown")
     tg_request(token, "sendMessage", {"chat_id": uid, "text": welcome, "reply_markup": {"inline_keyboard": kb}})
     return False
 
