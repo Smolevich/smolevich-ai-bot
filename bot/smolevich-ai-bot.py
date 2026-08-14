@@ -1715,7 +1715,15 @@ def fetch_leaderboard(force=False):
 
 
 def solved_out_of_ten(entry):
-    """Native pass rate as whole answers out of ten; None when the model was never measured."""
+    """Answers solved out of ten; None when the model has not been measured enough."""
+    if entry.get("provisional"):
+        return None
+    direct = entry.get("solved_of_ten")
+    if direct is not None:
+        try:
+            return int(direct)
+        except (TypeError, ValueError):
+            return None
     native = (entry.get("scores") or {}).get("native")
     if native is None:
         return None
@@ -1779,6 +1787,10 @@ def build_provider_health_text():
     dead = [r["provider"] for r in rows if not r["live"]]
     if dead:
         lines.append(f"\n⚠️ Полностью мёртвые: {', '.join(dead)}. Проверь ключ и биллинг.")
+    parked = [s for s in DB.get_provider_state() if int(s.get("disabled_until") or 0) > now]
+    for s in parked:
+        left_h = max(0, (int(s["disabled_until"]) - now) // 3600)
+        lines.append(f"\n⛔️ {s['provider']} снят с обстрела ещё на {left_h} ч: {str(s.get('reason') or '')[:90]}")
     return "\n".join(lines)
 
 
