@@ -44,7 +44,6 @@ DEFAULT_LOOKBACK_HOURS = 168
 STABLE_MIN_SUCCESS_RATE = 0.9
 STABLE_MIN_CHECKS = 6
 STABLE_MAX_LATENCY_MS = 8000
-STABLE_MAX_BENCH_TRANSIENT_ERRORS = 2
 
 DEFAULT_NATIVE_WORKERS = 4
 DEFAULT_MAX_JOBS = 200
@@ -207,7 +206,9 @@ def stable_models(conn: sqlite3.Connection, provider: str, limit: int, lookback_
               AND COALESCE(recent.checks, 0) >= ?
               AND COALESCE(CAST(recent.ok_checks AS REAL) / NULLIF(recent.checks, 0), 0.0) >= ?
               AND COALESCE(recent.avg_latency_ms, NULLIF(mh.latency_ms, 0), 999999) <= ?
-              AND COALESCE(bench_transient.transient_errors, 0) <= ?
+            -- 429 used to disqualify a model outright, which meant a provider we had
+            -- overrun disappeared from the board for a week and looked dead. Throttling
+            -- now prevents the overrun, so this only breaks ties.
             ORDER BY success_rate DESC, transient_errors ASC, stable_latency_ms ASC, checks DESC, mh.model_id ASC
             LIMIT ?
             """,
@@ -218,7 +219,6 @@ def stable_models(conn: sqlite3.Connection, provider: str, limit: int, lookback_
                 STABLE_MIN_CHECKS,
                 STABLE_MIN_SUCCESS_RATE,
                 STABLE_MAX_LATENCY_MS,
-                STABLE_MAX_BENCH_TRANSIENT_ERRORS,
                 max(1, limit),
             ),
         ).fetchall()
