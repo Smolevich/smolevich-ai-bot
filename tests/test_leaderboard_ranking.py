@@ -60,20 +60,20 @@ class ComputeOverall(unittest.TestCase):
 class ProvisionalThreshold(unittest.TestCase):
     def test_below_threshold_is_provisional(self):
         self.assertTrue(mb.is_provisional(0))
-        self.assertTrue(mb.is_provisional(mb.MIN_RUNS_TO_RANK - 1))
+        self.assertTrue(mb.is_provisional(mb.MIN_SAMPLES_TO_RANK - 1))
 
     def test_at_threshold_is_ranked(self):
-        self.assertFalse(mb.is_provisional(mb.MIN_RUNS_TO_RANK))
-        self.assertFalse(mb.is_provisional(mb.MIN_RUNS_TO_RANK + 10))
+        self.assertFalse(mb.is_provisional(mb.MIN_SAMPLES_TO_RANK))
+        self.assertFalse(mb.is_provisional(mb.MIN_SAMPLES_TO_RANK + 10))
 
 
 class SortOrder(unittest.TestCase):
     def test_two_run_model_cannot_outrank_eight_run_model(self):
         """The exact failure seen on the published board."""
         rows = [
-            entry("llama-3.2-11b-vision", score=0.762, runs=2),
-            entry("gpt-oss-20b", score=0.728, runs=8),
-            entry("qwen-3-32b", score=0.722, runs=6),
+            entry("llama-3.2-11b-vision", score=0.762, runs=5),
+            entry("gpt-oss-20b", score=0.728, runs=40),
+            entry("qwen-3-32b", score=0.722, runs=30),
         ]
         self.assertEqual(order(rows), ["gpt-oss-20b", "qwen-3-32b", "llama-3.2-11b-vision"])
 
@@ -95,21 +95,21 @@ class SortOrder(unittest.TestCase):
     def test_real_gap_still_decides(self):
         """Hysteresis must not flatten genuine differences."""
         rows = [
-            entry("clearly_better", score=0.80, runs=5),
+            entry("clearly_better", score=0.80, runs=25),
             entry("clearly_worse", score=0.60, runs=40),
         ]
         self.assertEqual(order(rows), ["clearly_better", "clearly_worse"])
 
     def test_latency_is_absent_from_the_sort_key(self):
-        slow = entry("slow", score=0.70, runs=10)
-        fast = entry("fast", score=0.70, runs=10)
+        slow = entry("slow", score=0.70, runs=40)
+        fast = entry("fast", score=0.70, runs=40)
         slow["latency_ms"], fast["latency_ms"] = 9000, 100
         self.assertEqual(mb.leaderboard_sort_key(slow), mb.leaderboard_sort_key(fast))
 
     def test_a_slower_model_still_wins_on_a_better_score(self):
         """Regression: latency_bonus could lift a fast model over a better one."""
-        slow_but_good = entry("slow_but_good", score=0.80, runs=10)
-        fast_but_worse = entry("fast_but_worse", score=0.60, runs=10)
+        slow_but_good = entry("slow_but_good", score=0.80, runs=40)
+        fast_but_worse = entry("fast_but_worse", score=0.60, runs=40)
         slow_but_good["latency_ms"], fast_but_worse["latency_ms"] = 9000, 100
         self.assertEqual(
             order([fast_but_worse, slow_but_good]),
@@ -137,24 +137,24 @@ class Status(unittest.TestCase):
 
 class Strengths(unittest.TestCase):
     def test_quality_tags_withheld_until_enough_runs(self):
-        tags = mb.infer_strengths("some/model", 0.95, 0.95, 900, total_runs=2)
+        tags = mb.infer_strengths("some/model", 0.95, 0.95, 900, total_runs=5)
         self.assertNotIn("Stable chat", tags)
         self.assertNotIn("Agent mode", tags)
 
     def test_quality_tags_granted_once_measured(self):
-        tags = mb.infer_strengths("some/model", 0.95, 0.95, 900, total_runs=10)
+        tags = mb.infer_strengths("some/model", 0.95, 0.95, 900, total_runs=40)
         self.assertIn("Stable chat", tags)
         self.assertIn("Agent mode", tags)
 
     def test_fast_tag_respects_the_threshold(self):
-        quick = mb.infer_strengths("m", 0.9, 0.0, mb.FAST_LATENCY_MS - 100, total_runs=10)
-        sluggish = mb.infer_strengths("m", 0.9, 0.0, 4800, total_runs=10)
+        quick = mb.infer_strengths("m", 0.9, 0.0, mb.FAST_LATENCY_MS - 100, total_runs=40)
+        sluggish = mb.infer_strengths("m", 0.9, 0.0, 4800, total_runs=40)
         self.assertIn("Fast", quick)
         self.assertNotIn("Fast", sluggish)
 
     def test_no_unconditional_language_tag(self):
         """It used to be appended to every model, so it carried no information."""
-        tags = mb.infer_strengths("some/model", 0.1, 0.1, 9000, total_runs=10)
+        tags = mb.infer_strengths("some/model", 0.1, 0.1, 9000, total_runs=40)
         self.assertNotIn("Russian/English", tags)
 
     def test_tag_list_stays_short(self):

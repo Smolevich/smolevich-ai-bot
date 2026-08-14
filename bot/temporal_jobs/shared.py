@@ -11,6 +11,12 @@ TERMINAL_ERROR_TYPE = "BenchmarkTerminalError"
 PROVIDER_CONCURRENCY = {"groq": 2, "openrouter": 3, "cerebras": 3, "nvidia": 3}
 DEFAULT_CONCURRENCY = 2
 
+# Concurrency alone did not help: groq and cerebras limit requests per minute, so 20 samples
+# fired back to back still 429 (80 of 125 groq calls, 40 of 62 cerebras ones on 2026-08-13).
+# Pause between chunks to stay under the per-minute ceiling.
+PROVIDER_PAUSE_SEC = {"groq": 5.0, "cerebras": 5.0, "openrouter": 1.0, "nvidia": 0.5}
+DEFAULT_PAUSE_SEC = 2.0
+
 
 @dataclass
 class BatchInput:

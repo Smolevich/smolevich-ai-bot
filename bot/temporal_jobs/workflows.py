@@ -11,9 +11,11 @@ from .shared import (
     BatchInput,
     CLAUDE_TASK_QUEUE,
     DEFAULT_CONCURRENCY,
+    DEFAULT_PAUSE_SEC,
     JobRef,
     LaneInput,
     PROVIDER_CONCURRENCY,
+    PROVIDER_PAUSE_SEC,
     TERMINAL_ERROR_TYPE,
 )
 
@@ -26,10 +28,11 @@ with workflow.unsafe.imports_passed_through():
         run_native_job,
     )
 
+# Free tiers meter per minute, so a retry five seconds later hits the same wall.
 RETRY = RetryPolicy(
-    initial_interval=timedelta(seconds=5),
+    initial_interval=timedelta(seconds=20),
     backoff_coefficient=2.0,
-    maximum_interval=timedelta(seconds=120),
+    maximum_interval=timedelta(seconds=180),
     maximum_attempts=4,
     non_retryable_error_types=[TERMINAL_ERROR_TYPE],
 )
@@ -42,8 +45,11 @@ class ProviderLaneWorkflow:
     @workflow.run
     async def run(self, inp: LaneInput) -> dict:
         width = PROVIDER_CONCURRENCY.get(inp.provider, DEFAULT_CONCURRENCY)
+        pause = PROVIDER_PAUSE_SEC.get(inp.provider, DEFAULT_PAUSE_SEC)
         ok = failed = 0
         for start in range(0, len(inp.refs), width):
+            if start:
+                await workflow.sleep(pause)
             chunk = inp.refs[start:start + width]
             results = await asyncio.gather(*[
                 workflow.execute_activity(

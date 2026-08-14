@@ -58,10 +58,15 @@ HALF_LIFE_BENCH_SEC = 48 * 3600
 HALF_LIFE_HEALTH_SEC = 48 * 3600
 MAX_RESPONSE_EXCERPT = 4000
 
-# A model needs this many finished bench runs before it gets a rank. Below the
+# A model needs this many scored samples before it gets a rank. Below the
 # threshold it is still published, but flagged `provisional` and sorted after
-# every ranked model — otherwise a 2-run model outranks an 8-run one on noise.
-MIN_RUNS_TO_RANK = 4
+# every ranked model — otherwise a 2-sample model outranks a 40-sample one on noise.
+# Counted in samples, not runs: one run writes samples_per_run rows, so the old
+# threshold of 4 "runs" was cleared by the very first batch.
+MIN_SAMPLES_TO_RANK = 20
+
+# Only openrouter answers the Anthropic Messages protocol that claude-code speaks.
+HARNESS_PROVIDERS = ("openrouter",)
 # Ranking weights. Health dominates on purpose: availability is measured
 # millions of times, bench score a few times per run.
 WEIGHT_HEALTH = 0.6
@@ -281,8 +286,10 @@ def enqueue_jobs(args: argparse.Namespace) -> str:
             log.info("Selected %s stable models for %s", len(models), provider)
             for rank, model in enumerate(models):
                 # native — для всех топ-3 моделей; claude — только топ-1.
+                # claude-code говорит протоколом Anthropic и дописывает к id суффикс [1m];
+                # его понимает только openrouter, остальные отвечают "issue with the selected model".
                 groups: list[tuple[str, list[dict[str, Any]]]] = [("native", native_tasks)]
-                if rank == 0:
+                if rank == 0 and provider in HARNESS_PROVIDERS:
                     groups.append(("claude", claude_tasks))
                 if args.mode != "all":
                     groups = [(m, t) for m, t in groups if m == args.mode]
@@ -768,9 +775,9 @@ def compute_overall(health_rate: float, bench_score: float) -> float:
     return health_rate * WEIGHT_HEALTH + bench_score * WEIGHT_BENCH
 
 
-def is_provisional(total_runs: int) -> bool:
-    """True while a model has too few runs for its score to mean anything."""
-    return total_runs < MIN_RUNS_TO_RANK
+def is_provisional(total_samples: int) -> bool:
+    """True while a model has too few scored samples for its score to mean anything."""
+    return total_samples < MIN_SAMPLES_TO_RANK
 
 
 def rank_status(health_rate: float, bench_score: float, provisional: bool) -> str:
@@ -813,19 +820,17 @@ def infer_strengths(
     to be appended to every model unconditionally, which made it noise; it is
     gone until there is a language check to back it.
     """
-    mid = model_id.lower()
     strengths: list[str] = []
-    measured = total_runs >= MIN_RUNS_TO_RANK
+    measured = total_runs >= MIN_SAMPLES_TO_RANK
     if measured and native_score >= 0.8:
         strengths.append("Stable chat")
     if measured and claude_score >= 0.7:
         strengths.append("Agent mode")
     if latency_ms and latency_ms < FAST_LATENCY_MS:
         strengths.append("Fast")
-    if any(k in mid for k in ("coder", "code", "devstral", "codestral")):
-        strengths.append("Code")
-    if any(k in mid for k in ("70b", "120b", "405b", "nemotron", "reason")):
-        strengths.append("Reasoning")
+    # "Code" and "Reasoning" used to be guessed from substrings in the model id, which
+    # contradicted the rule above and, worse, tagged "Reasoning" the very models the
+    # 256-token cap was cutting off mid-thought. Gone until a task measures them.
     return strengths[:4]
 
 
@@ -1011,42 +1016,32 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
         claude_runs = bench_runs.get(claude_key, 0)
         native_score = ewma(bench_score_samples.get(native_key, []), now, HALF_LIFE_BENCH_SEC) if native_runs else 0.0
         claude_score = ewma(bench_score_samples.get(claude_key, []), now, HALF_LIFE_BENCH_SEC) if claude_runs else 0.0
-        bench_lat_native = int(ewma(bench_latency_samples.get(native_key, []), now, HALF_LIFE_BENCH_SEC))
-        bench_lat_claude = int(ewma(bench_latency_samples.get(claude_key, []), now, HALF_LIFE_BENCH_SEC))
-        bench_lat = bench_lat_native or bench_lat_claude
-        if bench_lat:
-            latency_ms = (latency_ms + bench_lat) // 2 if latency_ms else bench_lat
+        # Latency comes from the bench alone. Averaging it with the health probe mixed a
+        # one-token ping with a full generation, and the "Fast" tag hung off that average.
+        bench_lat = int(ewma(bench_latency_samples.get(native_key, []), now, HALF_LIFE_BENCH_SEC))
+        latency_ms = bench_lat or latency_ms
 
         last_bench = bench_last_ts.get(pm, 0)
 
         if (native_runs + claude_runs) == 0 and not args.include_unbenchmarked:
             continue
 
-        if native_runs and claude_runs:
-            bench_score = native_score * 0.65 + claude_score * 0.35
-        elif claude_runs:
-            bench_score = claude_score
-        elif native_runs:
-            bench_score = native_score
-        else:
-            bench_score = 0.0
+        # One formula for everyone. Mixing claude in only for the top-1 model of each
+        # provider meant the column held numbers produced two different ways, and the
+        # model picked for the deeper check was punished for having been checked deeper.
+        bench_score = native_score if native_runs else 0.0
 
-        total_runs = native_runs + claude_runs
+        total_runs = native_runs
         overall = compute_overall(health_rate, bench_score)
         provisional = is_provisional(total_runs)
         status = rank_status(health_rate, bench_score, provisional)
 
+        # Plain sentences, no "pass rate" / "tool use" / "window": this text is shown to people.
         if provisional:
-            notes = f"Not enough data to rank yet: {total_runs} run(s)."
+            notes = f"Замеров пока мало: {total_runs} из {MIN_SAMPLES_TO_RANK}."
         else:
-            notes = f"Uptime {health_rate:.0%} over the window"
-            if total_runs:
-                notes += f"; pass rate native {native_score:.0%}"
-                if claude_runs:
-                    notes += f", tool use {claude_score:.0%}"
-                notes += f" across {total_runs} run(s)."
-            else:
-                notes += "."
+            solved = int(round(native_score * 10))
+            notes = f"Решает {solved} из 10 задач, работает {health_rate:.0%} времени."
 
         tokens_list = tokens_by_pm.get(pm) or []
         avg_tokens = round(sum(tokens_list) / len(tokens_list)) if tokens_list else None
@@ -1063,7 +1058,10 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
                     "model": model_id,
                     "provider": PROVIDER_LABELS.get(provider, provider),
                     "strengths": infer_strengths(model_id, native_score, claude_score, latency_ms, total_runs),
-                    "contextWindow": context_window_hint(model_id),
+                    # contextWindow used to be guessed from the model id and came out empty
+                    # for every free model that had it, so it published nothing but noise.
+                    "solved_of_ten": int(round(native_score * 10)) if native_runs else None,
+                    "latency_ms": latency_ms or None,
                     "status": status,
                     "notes": notes[:240],
                     "runs": total_runs,
@@ -1079,15 +1077,11 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
             }
         )
     ranked.sort(key=leaderboard_sort_key, reverse=True)
-    seen_providers: set[str] = set()
-    top_per_provider: list[dict[str, Any]] = []
-    for item in ranked:
-        prov = item["model"]["provider"]
-        if prov not in seen_providers:
-            seen_providers.add(prov)
-            top_per_provider.append(item)
+    # A board of four, one per provider, threw away three quarters of what was measured
+    # and hid the case where one provider holds the two best models. Cap by --limit instead.
+    limit = max(1, int(getattr(args, "limit", 0) or 30))
     models = []
-    for idx, item in enumerate(top_per_provider, start=1):
+    for idx, item in enumerate(ranked[:limit], start=1):
         m = item["model"]
         m["rank"] = idx
         m["task_results"] = item["task_results"]
