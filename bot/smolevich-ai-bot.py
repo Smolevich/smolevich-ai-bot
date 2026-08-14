@@ -288,22 +288,23 @@ QUICK_CHAT = {"ru": "💬 Спросить", "en": "💬 Ask"}
 # A reply keyboard stays on the client until it is replaced, so a button removed from the
 # layout keeps arriving as plain text — and went to the model as a question.
 QUICK_MODEL_LEGACY = {"ru": "🤖 Модель", "en": "🤖 Model"}
+QUICK_BOARD = {"ru": "🏆 Кто лучше", "en": "🏆 Best models"}
 QUICK_STT = {"ru": "🎙 Аудио → текст", "en": "🎙 Audio → text"}
 QUICK_TTS = {"ru": "🔊 Текст → аудио", "en": "🔊 Text → audio"}
 QUICK_MORE = {"ru": "☰ Ещё", "en": "☰ More"}
 
 
 def build_quick_keyboard(sess):
-    """Bottom reply keyboard: four buttons at most, everything else lives under ☰."""
+    """Bottom reply keyboard: four buttons at most, everything else lives under ☰.
+
+    The board is the product, so it opens in one tap; transcription moved under ☰ because
+    it is the secondary function and it was standing in front of the main one.
+    """
     lang = "en" if sess.get("ui_lang", "ru") == "en" else "ru"
-    voice_row = []
+    kb = [[{"text": QUICK_CHAT[lang]}, {"text": QUICK_BOARD[lang]}]]
+    # Four buttons is the cap, so only transcription gets a spot here; voicing lives under ☰.
     if has_stt_models():
-        voice_row.append({"text": QUICK_STT[lang]})
-    if has_tts_models():
-        voice_row.append({"text": QUICK_TTS[lang]})
-    kb = [[{"text": QUICK_CHAT[lang]}]]
-    if voice_row:
-        kb.append(voice_row)
+        kb.append([{"text": QUICK_STT[lang]}])
     kb.append([{"text": QUICK_MORE[lang]}])
     return {"keyboard": kb, "resize_keyboard": True, "is_persistent": True}
 
@@ -314,8 +315,8 @@ def quick_action_for(text):
     Matching is exact: `in`/`startswith` would swallow real questions.
     """
     t = (text or "").strip()
-    for action, labels in (("chat", QUICK_CHAT), ("stt", QUICK_STT), ("tts", QUICK_TTS),
-                           ("more", QUICK_MORE), ("model", QUICK_MODEL_LEGACY)):
+    for action, labels in (("chat", QUICK_CHAT), ("board", QUICK_BOARD), ("stt", QUICK_STT),
+                           ("tts", QUICK_TTS), ("more", QUICK_MORE), ("model", QUICK_MODEL_LEGACY)):
         if t in labels.values():
             return action
     return ""
@@ -325,8 +326,9 @@ def build_menu_root(sess, is_admin=False):
     """Корневое inline-меню: то, что не влезло в четыре нижние кнопки."""
     ui_lang = sess.get("ui_lang", "ru")
     is_en = ui_lang == "en"
-    kb = [[{"text": ("🤖 Model" if is_en else "🤖 Модель"), "callback_data": "menu:model"}],
-          [{"text": ("🏆 Top models" if is_en else "🏆 Топ моделей"), "callback_data": "menu:top"}]]
+    kb = [[{"text": ("🤖 Model" if is_en else "🤖 Модель"), "callback_data": "menu:model"}]]
+    if has_tts_models():
+        kb.append([{"text": ("🔊 Text → audio" if is_en else "🔊 Текст → аудио"), "callback_data": "menu:tts"}])
     if has_video_detector():
         kb.append([{"text": ("🕵️ Is the video AI-made?" if is_en else "🕵️ Видео: AI или нет"), "callback_data": "menu:video"}])
     kb.append([{"text": ("⚙️ Settings" if is_en else "⚙️ Настройки"), "callback_data": "menu:settings"}])
@@ -875,8 +877,8 @@ def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tool
                 err_body = e.read().decode(errors="replace")
             except Exception:
                 err_body = ""
-            hint = "\nОткрой /menu или /models чтобы выбрать другую."
-            if e.code == 404: return f"❌ Модель `{model}` недоступна.{hint}", usage, meta
+            hint = ""
+            if e.code == 404: return f"Эта модель сейчас не отвечает. Выбери другую в списке.{hint}", usage, meta
             if e.code == 429:
                 val = e.headers.get("Retry-After") or e.headers.get("x-ratelimit-reset")
                 try:
@@ -884,10 +886,10 @@ def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tool
                     if v > 1e9: v -= time.time()
                     wait_info = f" (Retry in {format_wait_time(max(0, v))})"
                 except: wait_info = f" ({val})"
-                return f"❌ Лимит запросов{wait_info}.{hint}", usage, meta
+                return f"У этой модели кончился бесплатный лимит{wait_info}. Возьми другую из списка.{hint}", usage, meta
             if err_body:
                 log.warning(f"HTTP {e.code} from provider for model={model}: {err_body[:400]}")
-            return f"❌ Ошибка провайдера (HTTP {e.code}).{hint}", usage, meta
+            return f"Не получилось получить ответ. Попробуй другую модель.{hint}", usage, meta
         except Exception as e:
             try:
                 meta["http_latency_ms"] += int((time.time() - t_http) * 1000)
@@ -1158,24 +1160,24 @@ def ask_via_acpx(uid, text, sess):
                 runtimeStatus[uid] = st
             return out, {"prompt_tokens": 0, "completion_tokens": 0}, {"finish_reason": f"acpx_{agent}", "tool_calls_total": 0, "error": None, "session_id": session_uuid}
         msg = err or out or f"acpx prompt failed with exit {r.returncode}"
-        msg = f"{msg} [raw: {raw_log}]"
+        log.error(f"acpx failed, raw log: {raw_log}")
         with runtimeStatusLock:
             st = runtimeStatus.get(uid, {})
             st.update({"active": False, "last_error_ts": int(time.time())})
             runtimeStatus[uid] = st
-        return f"❌ ACP mode error: {msg[:1200]}", {"prompt_tokens": 0, "completion_tokens": 0}, {"finish_reason": "acpx_error", "tool_calls_total": 0, "error": msg[:200], "session_id": session_uuid}
+        return f"Не справился с задачей.\n{msg[:300]}", {"prompt_tokens": 0, "completion_tokens": 0}, {"finish_reason": "acpx_error", "tool_calls_total": 0, "error": msg[:200], "session_id": session_uuid}
     except FileNotFoundError:
         with runtimeStatusLock:
             st = runtimeStatus.get(uid, {})
             st.update({"active": False, "last_error_ts": int(time.time())})
             runtimeStatus[uid] = st
-        return "❌ ACP mode is enabled, but `acpx` is not installed on server yet.", {"prompt_tokens": 0, "completion_tokens": 0}, {"finish_reason": "acpx_missing", "tool_calls_total": 0, "error": "acpx_missing", "session_id": locals().get("session_uuid", "")}
+        return "Этот режим сейчас недоступен.", {"prompt_tokens": 0, "completion_tokens": 0}, {"finish_reason": "acpx_missing", "tool_calls_total": 0, "error": "acpx_missing", "session_id": locals().get("session_uuid", "")}
     except subprocess.TimeoutExpired:
         with runtimeStatusLock:
             st = runtimeStatus.get(uid, {})
             st.update({"active": False, "last_error_ts": int(time.time())})
             runtimeStatus[uid] = st
-        return "❌ ACP mode timed out.", {"prompt_tokens": 0, "completion_tokens": 0}, {"finish_reason": "acpx_timeout", "tool_calls_total": 0, "error": "timeout", "session_id": locals().get("session_uuid", "")}
+        return "Слишком долго — прервал. Попробуй задачу попроще.", {"prompt_tokens": 0, "completion_tokens": 0}, {"finish_reason": "acpx_timeout", "tool_calls_total": 0, "error": "timeout", "session_id": locals().get("session_uuid", "")}
     except Exception as e:
         with runtimeStatusLock:
             st = runtimeStatus.get(uid, {})
@@ -1351,6 +1353,24 @@ def send_tts_audio(token, uid, source_text):
         )
         tg_send_text(token, uid, f"❌ TTS error: {str(e)[:300]}")
 
+def welcome_after_gate(uid, token, admin_id):
+    """Passing the gate must open the bot, not end the conversation.
+
+    The gate consumes the user's only /start, so without this they were left staring at
+    a one-word confirmation with no keyboard and no menu.
+    """
+    sess = DB.get_session(uid)
+    is_en = sess.get("ui_lang", "ru") == "en"
+    tg_request(token, "sendMessage", {
+        "chat_id": uid,
+        "text": ("You're in. Ask me anything, or see which free models do best."
+                 if is_en else "Готово. Спрашивай что угодно — или посмотри, какие бесплатные модели лучше справляются."),
+        "reply_markup": build_quick_keyboard(sess),
+    })
+    l_txt, l_kb = build_leaderboard_view(is_en=is_en)
+    tg_request(token, "sendMessage", {"chat_id": uid, "text": l_txt, "reply_markup": {"inline_keyboard": l_kb}})
+
+
 def handle_callback(cb, token, admin_id):
     uid = cb["from"]["id"]; data = cb.get("data", "")
     log.info(f"Callback from {uid}: {data}")
@@ -1366,7 +1386,7 @@ def handle_callback(cb, token, admin_id):
         default_model = DB.pick_default_text_model(prov_name) or PROVIDERS[prov_name]["default_model"]
         default_tools = PROVIDERS[prov_name].get("supports_tools", True)
         DB.save_session(uid, default_model, sess["history"], provider=prov_name, tools_enabled=default_tools, engine_mode=sess.get("engine_mode", "native"))
-        tg_request(token, "editMessageText", {"chat_id": cb["message"]["chat"]["id"], "message_id": cb["message"]["message_id"], "text": f"✅ Provider: {prov_name}\nModel: {default_model}\nTools: {'on' if default_tools else 'off'}"})
+        tg_request(token, "editMessageText", {"chat_id": cb["message"]["chat"]["id"], "message_id": cb["message"]["message_id"], "text": f"💬 Отвечает {default_model}. Спрашивай.", "reply_markup": {"inline_keyboard": [[{"text": "← Назад", "callback_data": "menu:back"}]]}})
     elif data.startswith("try:"):
         # Straight from a leaderboard row: switch provider and model together, stay on the list.
         _, code, model = data.split(":", 2)
@@ -1401,18 +1421,13 @@ def handle_callback(cb, token, admin_id):
             })
             return
         DB.save_session(uid, m, sess["history"], provider=sess["provider"], tools_enabled=sess["tools_enabled"], engine_mode=sess.get("engine_mode", "native"))
-        txt = f"✅ Model: {m}"
-        if info:
-            status = "🟢 Online" if info["available"] else "🔴 Offline"
-            tools = "🛠 Tools" if info["supports_tools"] else "❌ No tools"
-            cat = info["category"]
-            latency = f"{info['latency_ms']}ms" if info["latency_ms"] else "—"
-            ago = int(time.time()) - info["last_check"]
-            if ago < 60: checked = "just now"
-            elif ago < 3600: checked = f"{ago // 60}m ago"
-            else: checked = f"{ago // 3600}h ago"
-            txt += f"\n{status} | {tools} | {cat}\nLatency: {latency} | Checked: {checked}"
-        res = tg_request(token, "editMessageText", {"chat_id": cb["message"]["chat"]["id"], "message_id": cb["message"]["message_id"], "text": txt})
+        is_en = sess.get("ui_lang", "ru") == "en"
+        short = m.split("/")[-1] if "/" in m else m
+        # Latency, category and "supports tools" are our plumbing; a person needs to know
+        # who answers now and how to get back.
+        txt = (f"💬 {short} is answering. Ask away." if is_en else f"💬 Отвечает {short}. Спрашивай.")
+        back_kb = {"inline_keyboard": [[{"text": ("← Back" if is_en else "← Назад"), "callback_data": "menu:back"}]]}
+        res = tg_request(token, "editMessageText", {"chat_id": cb["message"]["chat"]["id"], "message_id": cb["message"]["message_id"], "text": txt, "reply_markup": back_kb})
         # Telegram returns "message is not modified" when user taps the already selected model.
         if not res.get("ok"):
             desc = (res.get("description") or "").lower()
@@ -1443,7 +1458,8 @@ def handle_callback(cb, token, admin_id):
     elif uid == admin_id and data.startswith("approve:"):
         t_uid = int(data.split(":")[1]); DB.set_allowed(t_uid, True)
         tg_request(token, "editMessageText", {"chat_id": cb["message"]["chat"]["id"], "message_id": cb["message"]["message_id"], "text": f"✅ Approved {t_uid}"})
-        tg_request(token, "sendMessage", {"chat_id": t_uid, "text": "✅ Доступ одобрен. Теперь можно пользоваться ботом."})
+        tg_request(token, "sendMessage", {"chat_id": t_uid, "text": "✅ Доступ открыт."})
+        welcome_after_gate(t_uid, token, admin_id)
     elif uid == admin_id and data.startswith("deny:"):
         t_uid = int(data.split(":")[1]); DB.set_allowed(t_uid, False)
         tg_request(token, "editMessageText", {"chat_id": cb["message"]["chat"]["id"], "message_id": cb["message"]["message_id"], "text": f"❌ Denied {t_uid}"})
@@ -1451,12 +1467,14 @@ def handle_callback(cb, token, admin_id):
     elif data == "check_sub":
         if is_subscribed(token, uid):
             DB.set_allowed(uid, True)
-            tg_request(token, "editMessageText", {"chat_id": cb["message"]["chat"]["id"], "message_id": cb["message"]["message_id"], "text": "✅ Verified!"})
+            tg_request(token, "editMessageText", {"chat_id": cb["message"]["chat"]["id"], "message_id": cb["message"]["message_id"], "text": "✅"})
+            welcome_after_gate(uid, token, admin_id)
         else: tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "❌ Not subscribed!", "show_alert": True})
     elif data == "request_access":
         if is_subscribed(token, uid):
             DB.set_allowed(uid, True)
-            tg_request(token, "editMessageText", {"chat_id": cb["message"]["chat"]["id"], "message_id": cb["message"]["message_id"], "text": "✅ Verified!"})
+            tg_request(token, "editMessageText", {"chat_id": cb["message"]["chat"]["id"], "message_id": cb["message"]["message_id"], "text": "✅"})
+            welcome_after_gate(uid, token, admin_id)
             return
         uname = cb.get("from", {}).get("username") or f"{cb.get('from', {}).get('first_name', '')} {cb.get('from', {}).get('last_name', '')}".strip()
         uname = f"@{uname}" if uname and not str(uname).startswith("@") else (uname or f"ID: {uid}")
@@ -1673,6 +1691,9 @@ def handle_quick_action(action, uid, token, admin_id):
         with pendingTtsUsersLock:
             pendingTtsUsers.add(uid)
         tg_send_text(token, uid, "🔊 Send the text to voice." if is_en else "🔊 Пришли текст — верну аудио.")
+    elif action == "board":
+        l_txt, l_kb = build_leaderboard_view(is_en=is_en)
+        tg_request(token, "sendMessage", {"chat_id": uid, "text": l_txt, "reply_markup": {"inline_keyboard": l_kb}})
     elif action == "model":
         # Old keyboard: answer what they asked for, and replace the stale layout.
         tg_request(token, "sendMessage", {
@@ -1715,7 +1736,7 @@ def handle_command(uid, username, text, token, admin_id):
         tg_send_text(token, admin_id, f"📝 Отзыв от {username} ({uid}):\n\n{body}")
         tg_send_text(token, uid, "Sent. Thank you." if is_en else "Отправил. Спасибо.")
     else:
-        tg_send_text(token, uid, "Slash-команды убраны. Используй /menu для действий и /help для подсказки.")
+        tg_send_text(token, uid, "Такой команды нет — всё есть в кнопках снизу.")
     return True
 
 
@@ -1961,7 +1982,7 @@ def process_update(upd, token, admin_id):
                     tg_send_text(
                         token,
                         uid,
-                        f"❌ Selected detector model is offline now ({provider}/{selected_model}). Last check: {checked}. Choose another model in /models -> VideoDetect.",
+                        "Проверка видео сейчас не работает. Попробуй позже.",
                     )
                     return
                 media = msg.get("video") or msg.get("animation") or msg.get("document")
@@ -2217,7 +2238,11 @@ def process_update(upd, token, admin_id):
 
         sys_prompt = build_system_prompt(is_admin=(uid == admin_id))
 
+        # The menu gates agent modes on admin, but the execution path did not: a session row
+        # left on 'claude' sent a real user into a 135-second sandbox with no way out.
         mode = sess.get("engine_mode", "native")
+        if mode != "native" and uid != admin_id:
+            mode = "native"
         from agent.telegram_api import tg_send_chat_action
         tg_send_chat_action(token, uid, action="typing")
         if mode in ("claude", "opencode", "pi"):
@@ -2232,7 +2257,7 @@ def process_update(upd, token, admin_id):
                                  prompt_messages,
                                  uid=uid, admin_id=admin_id, use_tools=use_tools, use_proxy=use_proxy)
         if ans == "No response":
-            ans = "⚠️ Empty model output. Try `/tools off` or choose another model via `/models`."
+            ans = "Модель вернула пустой ответ. Попробуй другую из списка."
         DB.add_usage(uid, usage['prompt_tokens'], usage['completion_tokens'])
         req_id = DB.log_request(uid, provider, model, usage['prompt_tokens'], usage['completion_tokens'],
                                 meta['finish_reason'], meta['tool_calls_total'], meta['error'], mode=sess.get("engine_mode", "native"), request_http_ms=meta.get("http_latency_ms", 0))

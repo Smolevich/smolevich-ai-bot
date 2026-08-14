@@ -41,7 +41,15 @@ class QuickKeyboard(unittest.TestCase):
         self.assertLessEqual(len(buttons(keyboard(SESSION_RU))), 4)
 
     def test_voice_buttons_hidden_when_unavailable(self):
-        self.assertEqual(len(buttons(keyboard(SESSION_RU, stt=False, tts=False))), 2)
+        # Chat, the board, and ☰ — voicing lives under ☰ so the cap of four always holds.
+        self.assertEqual(len(buttons(keyboard(SESSION_RU, stt=False, tts=False))), 3)
+
+    def test_the_board_is_one_tap_away(self):
+        self.assertIn(bot.QUICK_BOARD["ru"], buttons(keyboard(SESSION_RU)))
+
+    def test_board_label_routes_to_the_board(self):
+        self.assertEqual(bot.quick_action_for(bot.QUICK_BOARD["ru"]), "board")
+        self.assertEqual(bot.quick_action_for(bot.QUICK_BOARD["en"]), "board")
 
     def test_english_session_gets_english_labels(self):
         self.assertIn(bot.QUICK_MORE["en"], buttons(keyboard(SESSION_EN)))

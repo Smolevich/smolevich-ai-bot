@@ -58,11 +58,16 @@ class MenuRoot(unittest.TestCase):
              mock.patch.object(bot, "has_video_detector", return_value=False):
             return bot.build_menu_root(SESSION, is_admin=is_admin)
 
-    def test_top_is_offered_to_plain_users(self):
+    def test_board_is_not_buried_in_a_submenu(self):
+        """It moved to the bottom keyboard: the product must open in one tap, not three."""
         _, kb = self.build(is_admin=False)
-        self.assertIn("menu:top", labels(kb))
+        self.assertNotIn("menu:top", labels(kb))
+        with mock.patch.object(bot, "has_stt_models", return_value=False), \
+             mock.patch.object(bot, "has_tts_models", return_value=False):
+            bottom = bot.build_quick_keyboard(SESSION)
+        self.assertIn(bot.QUICK_BOARD["ru"], [b["text"] for row in bottom["keyboard"] for b in row])
 
-    def test_admin_menu_does_not_duplicate_top(self):
+    def test_admin_menu_does_not_duplicate_the_board(self):
         self.assertNotIn("menu:top", labels(bot.build_admin_menu(SESSION)[1]))
 
 
