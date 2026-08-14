@@ -13,6 +13,18 @@ PATTERN = re.compile(
     re.DOTALL
 )
 
+LIST_MARKER = re.compile(r'^([ \t]*)\*[ \t]+', re.MULTILINE)
+
+
+def normalize_list_markers(text: str) -> str:
+    """Turn `* item` bullets into `• item`.
+
+    A bullet at the start of a line is indistinguishable from an italic opener, so the
+    parser swallowed it and left the closing star dangling at the end of the line.
+    """
+    return LIST_MARKER.sub(r'\1• ', text or "")
+
+
 def parse_markdown_to_entities(text: str) -> tuple[str, list[dict]]:
     """Parse Markdown text into plain text and a list of Telegram MessageEntity objects."""
     entities = []

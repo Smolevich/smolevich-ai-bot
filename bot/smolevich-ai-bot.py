@@ -36,7 +36,7 @@ from agent.text import (
     estimate_tokens,
     sanitize_model_id,
 )
-from agent.entities import parse_markdown_to_entities
+from agent.entities import normalize_list_markers, parse_markdown_to_entities
 from agent.provider_api import available_providers, load_provider_key, make_opener
 from agent.telegram_api import tg_get_file_bytes, tg_request, tg_send_document_bytes, tg_send_long_text, tg_send_text, multipart_body
 from agent.db import DB
@@ -285,6 +285,9 @@ def build_models_view(sess, category="text", limit=12):
     return txt, kb
 
 QUICK_CHAT = {"ru": "💬 Спросить", "en": "💬 Ask"}
+# A reply keyboard stays on the client until it is replaced, so a button removed from the
+# layout keeps arriving as plain text — and went to the model as a question.
+QUICK_MODEL_LEGACY = {"ru": "🤖 Модель", "en": "🤖 Model"}
 QUICK_STT = {"ru": "🎙 Аудио → текст", "en": "🎙 Audio → text"}
 QUICK_TTS = {"ru": "🔊 Текст → аудио", "en": "🔊 Text → audio"}
 QUICK_MORE = {"ru": "☰ Ещё", "en": "☰ More"}
@@ -311,7 +314,8 @@ def quick_action_for(text):
     Matching is exact: `in`/`startswith` would swallow real questions.
     """
     t = (text or "").strip()
-    for action, labels in (("chat", QUICK_CHAT), ("stt", QUICK_STT), ("tts", QUICK_TTS), ("more", QUICK_MORE)):
+    for action, labels in (("chat", QUICK_CHAT), ("stt", QUICK_STT), ("tts", QUICK_TTS),
+                           ("more", QUICK_MORE), ("model", QUICK_MODEL_LEGACY)):
         if t in labels.values():
             return action
     return ""
@@ -906,6 +910,21 @@ def ensure_dir(path):
     except Exception:
         pass
 
+ACP_PROTOCOL_LINE = re.compile(
+    r"^\s*\[(client|server|agent|done|tool|error|info)\b[^\]]*\].*$", re.MULTILINE)
+
+
+def strip_acp_noise(text):
+    """Drop the agent's protocol chatter — `[client] session/new (running)`, `[done] end_turn`.
+
+    acpx prints its handshake to stdout together with the answer, and all of it used to be
+    forwarded to the user verbatim.
+    """
+    cleaned = ACP_PROTOCOL_LINE.sub("", text or "")
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
 def acp_agent_for_mode(mode):
     m = (mode or "").strip().lower()
     if m in ("claude", "opencode", "pi"):
@@ -1123,7 +1142,7 @@ def ask_via_acpx(uid, text, sess):
                     {"finish_reason": "acpx_busy", "tool_calls_total": 0, "error": "lock_busy", "session_id": session_uuid},
                 )
             r = subprocess.run(run_cmd, capture_output=True, text=True, timeout=180, env=env)
-        out = (r.stdout or "").strip()
+        out = strip_acp_noise(r.stdout or "")
         err = (r.stderr or "").strip()
         raw = ((r.stdout or "") + (("\n" + r.stderr) if r.stderr else "")).strip()
         raw_log = f"{user_dir}/.acpx-last-raw.log"
@@ -1650,6 +1669,16 @@ def handle_quick_action(action, uid, token, admin_id):
         with pendingTtsUsersLock:
             pendingTtsUsers.add(uid)
         tg_send_text(token, uid, "🔊 Send the text to voice." if is_en else "🔊 Пришли текст — верну аудио.")
+    elif action == "model":
+        # Old keyboard: answer what they asked for, and replace the stale layout.
+        tg_request(token, "sendMessage", {
+            "chat_id": uid,
+            "text": ("Model lives under ☰ More now — buttons updated." if is_en
+                     else "Модель теперь под ☰ Ещё — обновил кнопки."),
+            "reply_markup": build_quick_keyboard(sess),
+        })
+        m_txt, m_kb = build_models_view(sess, category="text", limit=12)
+        tg_request(token, "sendMessage", {"chat_id": uid, "text": m_txt, "reply_markup": {"inline_keyboard": m_kb}})
     elif action == "more":
         m_txt, m_kb = build_menu_root(sess, is_admin=(uid == admin_id))
         tg_request(token, "sendMessage", {"chat_id": uid, "text": m_txt, "reply_markup": {"inline_keyboard": m_kb}})
@@ -2234,7 +2263,7 @@ def process_update(upd, token, admin_id):
         if estimate_tokens(hist) > MAX_CONTEXT_TOKENS * 0.5:
             kb = {"inline_keyboard": [[{"text": "🔄 Reset Context", "callback_data": "reset_context"}]]}
             
-        txt_parsed, ents = parse_markdown_to_entities(raw_reply)
+        txt_parsed, ents = parse_markdown_to_entities(normalize_list_markers(raw_reply))
         send_res = tg_send_long_text(token, uid, txt_parsed, entities=ents, reply_markup=kb)
         DB.set_request_delivered(req_id, bool(send_res.get("ok")))
         queued = None
