@@ -244,45 +244,37 @@ def has_video_detector():
     return bool(pick_video_detector()[1])
 
 def build_models_view(sess, category="text", limit=12):
+    """Who can answer you, in the same words the leaderboard uses.
+
+    The old screen showed `🟢🛠🎙 muse-glimmer-30b 812ms` — four unexplained icons, an
+    identifier and milliseconds. None of that answers "which one should I pick".
+    """
+    is_en = sess.get("ui_lang", "ru") == "en"
     prov = sess["provider"]
-    category = "text"
-    db_category = "text"
-    # For /models we must be deterministic and fast: use only DB cache, never provider network fetches.
-    ms = DB.get_recent_models(prov, max_age_sec=1800, category=db_category, limit=max(limit * 3, 30))
+    ms = DB.get_recent_models(prov, max_age_sec=1800, category="text", limit=max(limit * 3, 30))
     # Offering a model the last probe called dead only buys the user an error.
     ms = [m for m in ms if m.get("available", True)]
     if not ms:
-        ms = DB.get_healthy_models(prov, category=db_category, limit=max(limit * 3, 30))
+        ms = DB.get_healthy_models(prov, category="text", limit=max(limit * 3, 30))
     ms = ms[:limit]
-    kb = [[{"text": "← Назад", "callback_data": "menu:settings"}]]
+
+    scored = {}
+    for entry in ((fetch_leaderboard() or {}).get("models") or []):
+        solved = solved_out_of_ten(entry)
+        if solved is not None:
+            scored[str(entry.get("model") or "")] = solved
+
+    kb = []
     for m in ms:
         mid = m["id"]
-        latency = m.get("latency_ms") or 0
-        available = m.get("available", True)
-        tools_icon = "🛠" if m.get("supportsTools") else ""
-        caps = capabilities_for_model(prov, mid)
-        cap_icons = ""
-        if "audio:stt" in caps:
-            cap_icons += "🎙"
-        if "audio:tts" in caps:
-            cap_icons += "🔊"
-        if "image" in caps:
-            cap_icons += "🖼"
-        if "video" in caps:
-            cap_icons += "🎬"
-        if "video:detect" in caps:
-            cap_icons += "🕵️"
-        if available and latency:
-            status_icon = "🟢"
-        elif available:
-            status_icon = "⚪"
-        else:
-            status_icon = "🔴"
-        latency_tag = f" {latency}ms" if latency else ""
         label = mid.split("/")[-1] if "/" in mid else mid
-        kb.append([{"text": f"{status_icon}{tools_icon}{cap_icons} {label}{latency_tag}", "callback_data": f"set_model:{mid}"}])
-    txt = f"Текстовые модели ({prov}):"
-    return txt, kb
+        solved = scored.get(mid)
+        if solved is not None:
+            label += (f" · solves {solved}/10" if is_en else f" · решает {solved} из 10")
+        kb.append([{"text": label[:60], "callback_data": f"set_model:{mid}"}])
+    kb.append([{"text": ("← Back" if is_en else "← Назад"), "callback_data": "menu:back"}])
+    return ("Who answers you" if is_en else "Кто будет отвечать"), kb
+
 
 QUICK_CHAT = {"ru": "💬 Спросить", "en": "💬 Ask"}
 # A reply keyboard stays on the client until it is replaced, so a button removed from the
@@ -927,6 +919,31 @@ def strip_acp_noise(text):
     return cleaned.strip()
 
 
+def keep_typing(token, uid):
+    """Hold the "typing" indicator for the whole answer.
+
+    Telegram clears it after about five seconds, while answers here average five and
+    reach two minutes — so the user sat in silence wondering if the bot was alive.
+    Returns a stop function.
+    """
+    stop = threading.Event()
+
+    def beat():
+        # Hard cap: if the caller dies before stopping us, the thread must not outlive the
+        # longest possible answer (harness runs are killed at 180s).
+        for _ in range(50):
+            if stop.wait(4.0):
+                return
+            try:
+                from agent.telegram_api import tg_send_chat_action
+                tg_send_chat_action(token, uid, action="typing")
+            except Exception:
+                return
+
+    threading.Thread(target=beat, daemon=True).start()
+    return stop.set
+
+
 def acp_agent_for_mode(mode):
     m = (mode or "").strip().lower()
     if m in ("claude", "opencode", "pi"):
@@ -1437,33 +1454,6 @@ def handle_callback(cb, token, admin_id):
                 tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Failed to update model", "show_alert": True})
         else:
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Model updated"})
-    elif data.startswith("models_cat:"):
-        cat = data.split(":", 1)[1].strip().lower()
-        sess = DB.get_session(uid)
-        txt, kb = build_models_view(sess, category=cat, limit=12)
-        res = tg_request(token, "editMessageText", {
-            "chat_id": cb["message"]["chat"]["id"],
-            "message_id": cb["message"]["message_id"],
-            "text": txt,
-            "reply_markup": {"inline_keyboard": kb},
-        })
-        if not res.get("ok"):
-            desc = (res.get("description") or "").lower()
-            if "message is not modified" in desc:
-                tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Already on this filter"})
-            else:
-                tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Failed to update list", "show_alert": True})
-        else:
-            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": f"Category: {cat}"})
-    elif uid == admin_id and data.startswith("approve:"):
-        t_uid = int(data.split(":")[1]); DB.set_allowed(t_uid, True)
-        tg_request(token, "editMessageText", {"chat_id": cb["message"]["chat"]["id"], "message_id": cb["message"]["message_id"], "text": f"✅ Approved {t_uid}"})
-        tg_request(token, "sendMessage", {"chat_id": t_uid, "text": "✅ Доступ открыт."})
-        welcome_after_gate(t_uid, token, admin_id)
-    elif uid == admin_id and data.startswith("deny:"):
-        t_uid = int(data.split(":")[1]); DB.set_allowed(t_uid, False)
-        tg_request(token, "editMessageText", {"chat_id": cb["message"]["chat"]["id"], "message_id": cb["message"]["message_id"], "text": f"❌ Denied {t_uid}"})
-        tg_request(token, "sendMessage", {"chat_id": t_uid, "text": "❌ В доступе отказано."})
     elif data == "check_sub":
         if is_subscribed(token, uid):
             DB.set_allowed(uid, True)
@@ -1534,12 +1524,15 @@ def handle_callback(cb, token, admin_id):
         if action == "back":
             m_txt, m_kb = build_menu_root(sess, is_admin=(uid == admin_id))
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": m_txt, "reply_markup": {"inline_keyboard": m_kb}})
+            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"]})
         elif action == "settings":
             s_txt, s_kb = build_menu_settings(sess, is_admin=(uid == admin_id))
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": s_txt, "reply_markup": {"inline_keyboard": s_kb}})
+            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"]})
         elif action == "admin" and uid == admin_id:
             a_txt, a_kb = build_admin_menu(sess)
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": a_txt, "reply_markup": {"inline_keyboard": a_kb}})
+            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"]})
         elif action == "chat":
             use_provider, use_model, switched = ensure_text_model_for_session(sess)
             DB.save_session(uid, use_model, sess["history"], provider=use_provider, tools_enabled=sess["tools_enabled"], engine_mode="native")
@@ -1569,8 +1562,6 @@ def handle_callback(cb, token, admin_id):
                 pendingTtsUsers.add(uid)
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": ("🔊 Text-to-speech enabled.\nSend text and I will return audio." if is_en else "🔊 Текст в речь включён.\nПришли текст — верну аудио."), "reply_markup": {"inline_keyboard": [[{"text": back_label, "callback_data": "menu:back"}]]}})
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "TTS"})
-        elif action == "image":
-            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Image-моделей сейчас нет", "show_alert": True})
         elif action == "video":
             _, video_model = pick_video_detector()
             if not video_model:
@@ -1591,6 +1582,7 @@ def handle_callback(cb, token, admin_id):
         elif action == "model":
             m_txt, m_kb = build_models_view(sess, category="text", limit=12)
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": m_txt, "reply_markup": {"inline_keyboard": m_kb}})
+            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"]})
         elif action == "provider":
             avail = available_providers()
             kb = [[{"text": f"{'✅ ' if name == sess['provider'] else ''}{name}", "callback_data": f"set_provider:{name}"}] for name in avail]
@@ -1614,9 +1606,6 @@ def handle_callback(cb, token, admin_id):
         elif action == "help":
             tg_request(token, "sendMessage", {"chat_id": uid, "text": build_help_text(sess, is_admin=(uid == admin_id))})
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Помощь отправлена"})
-        elif action == "feedback":
-            tg_request(token, "sendMessage", {"chat_id": uid, "text": "📝 Чтобы отправить отзыв админу, напиши:\n/feedback <текст сообщения>"})
-            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Инструкция отправлена"})
         elif action == "top":
             l_txt, l_kb = build_leaderboard_view(is_en=is_en)
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": l_txt, "reply_markup": {"inline_keyboard": l_kb}})
@@ -2245,6 +2234,7 @@ def process_update(upd, token, admin_id):
             mode = "native"
         from agent.telegram_api import tg_send_chat_action
         tg_send_chat_action(token, uid, action="typing")
+        stop_typing = keep_typing(token, uid)
         if mode in ("claude", "opencode", "pi"):
             agent_name = acp_agent_for_mode(mode)
             _p, _m, switched = harness_target(agent_name, provider, model)
@@ -2311,6 +2301,7 @@ def process_update(upd, token, admin_id):
         queued = None
         with pendingTextByUserLock:
             queued = pendingTextByUser.pop(uid, None)
+        stop_typing()
         with inflightUsersLock:
             inflightUsers.discard(uid)
             inflightBusyNoticeTs.pop(uid, None)
