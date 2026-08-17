@@ -70,9 +70,16 @@ class Throttling(unittest.TestCase):
         from temporal_jobs import shared  # noqa: PLC0415 — optional dependency-free module
         self.shared = shared
 
-    def test_rate_limited_providers_pause_between_chunks(self):
-        self.assertGreaterEqual(self.shared.PROVIDER_PAUSE_SEC["groq"], 2.0)
-        self.assertGreaterEqual(self.shared.PROVIDER_PAUSE_SEC["cerebras"], 2.0)
+    def test_metered_providers_are_paced_for_their_ceiling(self):
+        """groq: 6000 tokens/min ÷ ~1500 an answer ≈ 4/min. cerebras: 4 requests/min."""
+        for provider in ("groq", "cerebras"):
+            self.assertGreaterEqual(self.shared.PROVIDER_PAUSE_SEC[provider], 12.0, provider)
+            self.assertEqual(self.shared.PROVIDER_CONCURRENCY[provider], 1, provider)
+
+    def test_unmetered_providers_are_not_slowed_down(self):
+        """nvidia and openrouter returned zero 429s across 480 samples."""
+        for provider in ("nvidia", "openrouter"):
+            self.assertGreaterEqual(self.shared.PROVIDER_CONCURRENCY[provider], 3, provider)
 
     def test_every_provider_has_a_pause(self):
         for provider in self.shared.PROVIDER_CONCURRENCY:
