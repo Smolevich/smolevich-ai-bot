@@ -1,17 +1,19 @@
-# Model health/audio/media checks + a safety net behind the Temporal benchmark.
-# Deployed by CI to /etc/cron.d/model-checks.
+# Provider probes. Deployed by CI to /etc/cron.d/model-checks.
 # flock prevents overlapping runs; timeout kills a stuck job before the next one starts.
 #
-# The benchmark itself is a Temporal schedule (smolevich-bench-2x-daily, 07:00/19:00 UTC).
-# The entry below only drains jobs that schedule left queued — it does NOT enqueue, so it
-# cannot produce a second batch. Remove it once Temporal has run clean for a week.
-# It runs 90 minutes after the schedule: a metered run now paces itself at ~16s per sample
-# and takes ~20 minutes, and this drain has no pacing of its own — overlapping them would
-# hand the providers exactly the burst the pacing exists to avoid.
+# The benchmark is NOT here: it runs on a Temporal schedule (smolevich-bench-2x-daily,
+# 07:00/19:00 UTC) executed by smolevich-bench-worker.service. A cron drain stood behind it
+# from 14 to 17 August and never picked up a single job across six clean runs, so it is gone.
+# To fall back to cron, restore:
+#   0 7,19 * * * root flock -n /var/lock/mbench.lock timeout 1800 \
+#     /bin/sh -c '... model-benchmark run --max-jobs 200 ...'
+# and pause the schedule, or both will enqueue the same batch.
+#
+# The probes stay on cron on purpose: seconds of work every ten minutes, nothing to make
+# durable, and moving them would add ~1500 Temporal actions a day for no gain.
 SHELL=/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 
 */10 * * * * root  flock -n /var/lock/mhc.lock    timeout 540   /usr/local/bin/model-health-check  >> /var/log/model-health-check.log  2>&1
 */15 * * * * root  flock -n /var/lock/mac.lock    timeout 540   /usr/local/bin/model-audio-check   >> /var/log/model-audio-check.log   2>&1
 */15 * * * * root  flock -n /var/lock/mmc.lock    timeout 540   /usr/local/bin/model-media-check   >> /var/log/model-media-check.log   2>&1
-30 8,20 * * * root  flock -n /var/lock/mbench.lock timeout 1800  /bin/sh -c 'set -a; . /opt/smolevich-ai-bot/.env 2>/dev/null || true; . /etc/socks-monitor/smolevich-ai-bot.env 2>/dev/null || true; set +a; [ "$BOT_BENCHMARK_DISABLED" = "1" ] && exit 0; /usr/local/bin/model-benchmark work --max-jobs 200' >> /var/log/model-benchmark.log 2>&1

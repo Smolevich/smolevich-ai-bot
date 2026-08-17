@@ -67,7 +67,7 @@ Ships `bot/smolevich-ai-bot.py` only and restarts the systemd unit. Use the GitH
 | `model-health-check` (text/code probes) | every 10 min | `/var/log/model-health-check.log` |
 | `model-audio-check` (STT/TTS probes) | every 15 min | `/var/log/model-audio-check.log` |
 | `model-media-check` (image/video discovery) | every 15 min | `/var/log/model-media-check.log` |
-| `model-benchmark run + leaderboard + purge` | twice daily at 07:00 and 19:00 UTC | `/var/log/model-benchmark.log` |
+| `model-benchmark` (Temporal schedule `smolevich-bench-2x-daily`, not cron) | twice daily at 07:00 and 19:00 UTC | `journalctl -u smolevich-bench-worker` |
 
 The benchmark pipeline takes the global `acpx` lock for its claude task, so it never collides with a live user chat in claude-mode.
 

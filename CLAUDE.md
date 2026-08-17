@@ -7,7 +7,8 @@ Telegram bot using free-tier LLM providers with a Podman sandbox. Runs on a VDS 
 - `bot/smolevich-ai-bot.py` — Telegram polling/webhook entrypoint shim.
 - `bot/agent/` — typed runtime modules (`config.py`, `text.py`, `db.py`, `entities.py`, `provider_api.py`, `telegram_api.py`, `acpx_lock.py`, `benchmark_scoring.py`).
 - `bot/model-{health,audio,media}-check.py` — provider/model probes (cron).
-- `bot/model-benchmark.py` — free-models benchmark (cron, 07:00 and 19:00 UTC).
+- `bot/model-benchmark.py` — free-models benchmark, run by a Temporal schedule
+  (`smolevich-bench-2x-daily`, 07:00/19:00 UTC) via `bot/temporal_jobs/`.
 - `bot/migrate.py` + `bot/migrations/` — yoyo migrations against the SQLite DB.
 
 Full file map: [docs/structure.md](docs/structure.md).
