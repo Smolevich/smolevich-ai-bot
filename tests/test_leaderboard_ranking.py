@@ -26,11 +26,17 @@ mb = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(mb)
 
 
-def entry(name, *, score, runs, last_bench=0, provisional=None):
-    """A leaderboard row as `leaderboard_payload` builds it."""
+def entry(name, *, score, runs, last_bench=0, provisional=None, uptime=0.95):
+    """A leaderboard row as `leaderboard_payload` builds it.
+
+    `score` is the pass rate; the board ranks by the whole-number form of it that it
+    also prints, so a row carries both.
+    """
     return {
         "name": name,
         "score": score,
+        "solved_of_ten": int(round(score * 10)),
+        "uptime": uptime,
         "runs": runs,
         "last_bench": last_bench,
         "provisional": mb.is_provisional(runs) if provisional is None else provisional,

@@ -793,16 +793,18 @@ def rank_status(health_rate: float, bench_score: float, provisional: bool) -> st
 def leaderboard_sort_key(item: dict[str, Any]) -> tuple[int, float, int, int]:
     """Sort key for the published board, used with reverse=True.
 
-    Provisional models rank below every measured one regardless of score.
-    `overall` is rounded to two decimals so positions do not swap on
-    thousandths, and run count breaks ties so the better-measured model wins.
-    Latency deliberately plays no part.
+    Ordered by the number the board actually shows — answers solved out of ten — so the
+    printed rank cannot contradict the printed score. Sorting by the blended
+    health+bench figure put "solves 8 of 10" below three models solving 7.
+
+    Provisional models rank below every measured one regardless of score. Uptime breaks
+    ties, then sample count, so the better-measured model wins. Latency plays no part.
     """
     return (
         0 if item.get("provisional") else 1,
-        round(item.get("score", 0.0), 2),
+        int(item.get("solved_of_ten") or 0),
+        round(item.get("uptime", 0.0), 2),
         int(item.get("runs", 0)),
-        int(item.get("last_bench", 0)),
     )
 
 
@@ -1074,6 +1076,8 @@ def leaderboard_payload(args: argparse.Namespace) -> dict[str, Any]:
                     },
                     "avg_total_tokens": avg_tokens,
                 },
+                "solved_of_ten": int(round(native_score * 10)) if native_runs else 0,
+                "uptime": round(health_rate, 3),
             }
         )
     ranked.sort(key=leaderboard_sort_key, reverse=True)

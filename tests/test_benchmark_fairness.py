@@ -90,5 +90,29 @@ class Throttling(unittest.TestCase):
         self.assertGreaterEqual(pauses["groq"], pauses["openrouter"])
 
 
+class BoardOrder(unittest.TestCase):
+    """The printed rank must not contradict the printed score."""
+
+    def row(self, name, solved, uptime=0.95, runs=40):
+        return {"name": name, "solved_of_ten": solved, "uptime": uptime,
+                "runs": runs, "provisional": False}
+
+    def order(self, rows):
+        return [r["name"] for r in sorted(rows, key=mb.leaderboard_sort_key, reverse=True)]
+
+    def test_solving_more_wins(self):
+        """Seen live: "solves 8 of 10" published below three models solving 7."""
+        rows = [self.row("seven", 7), self.row("eight", 8)]
+        self.assertEqual(self.order(rows)[0], "eight")
+
+    def test_uptime_breaks_a_tie(self):
+        rows = [self.row("flaky", 7, uptime=0.80), self.row("steady", 7, uptime=0.99)]
+        self.assertEqual(self.order(rows)[0], "steady")
+
+    def test_provisional_sinks_below_measured(self):
+        rows = [dict(self.row("unproven", 10), provisional=True), self.row("measured", 5)]
+        self.assertEqual(self.order(rows)[0], "measured")
+
+
 if __name__ == "__main__":
     unittest.main()
