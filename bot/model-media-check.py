@@ -43,12 +43,6 @@ PROVIDERS = {
         "supports_tools": True,
         "proxy": USE_PROXY,
     },
-    "cerebras": {
-        "models_url": "https://api.cerebras.ai/v1/models",
-        "key_file": "/etc/socks-monitor/.cerebras_key",
-        "supports_tools": False,
-        "proxy": USE_PROXY,
-    },
     "nvidia": {
         "models_url": "https://integrate.api.nvidia.com/v1/models",
         "key_file": "/etc/socks-monitor/.nvidia_key",

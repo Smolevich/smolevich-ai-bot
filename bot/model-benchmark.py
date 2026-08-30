@@ -81,7 +81,6 @@ TASKS_ENDPOINT = "https://notes-share.smolevich90.workers.dev/api/smolevich-ai-b
 PROVIDER_LABELS = {
     "openrouter": "OpenRouter",
     "groq": "Groq",
-    "cerebras": "Cerebras",
     "nvidia": "NVIDIA",
 }
 

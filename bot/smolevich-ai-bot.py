@@ -26,6 +26,7 @@ from agent.config import (
     MAX_CONTEXT_TOKENS,
     PROVIDERS,
     PROVIDER_DEFAULT,
+    PROVIDER_PARKED_UNTIL_HUMAN,
     PROXY_URL,
     REQUIRED_CHANNEL,
     SESSIONS_ROOT,
@@ -952,11 +953,11 @@ def acp_agent_for_mode(mode):
 
 
 # claude-code and opencode talk the Anthropic Messages protocol, which only OpenRouter answers
-# among our providers; pi speaks each provider's native API but only knows these three keys.
+# among our providers; pi speaks each provider's native API but only knows these keys.
 HARNESS_PROVIDERS = {
     "claude": ("openrouter",),
     "opencode": ("openrouter",),
-    "pi": ("openrouter", "groq", "cerebras"),
+    "pi": ("openrouter", "groq"),
 }
 
 
@@ -1089,7 +1090,6 @@ def ask_via_acpx(uid, text, sess):
             nativeEnvMap = {
                 "openrouter": "OPENROUTER_API_KEY",
                 "groq": "GROQ_API_KEY",
-                "cerebras": "CEREBRAS_API_KEY",
             }
             nativeEnv = nativeEnvMap.get(provider)
             nativeKey = env.get("OPENAI_API_KEY", "")
@@ -1290,7 +1290,7 @@ def send_status_text(token, uid):
             rl_text = "n/a (openrouter key-limits unavailable)"
     elif rl and rl_provider == provider:
         rl_text = ", ".join([f"{k}={v}" for k, v in sorted(rl.items())])
-    elif provider in ("groq", "cerebras"):
+    elif provider == "groq":
         rl_text = "n/a (send one request with this provider to populate headers)"
     elif provider == "nvidia":
         rl_text = "n/a (provider typically does not expose quota headers)"
@@ -1731,7 +1731,7 @@ def handle_command(uid, username, text, token, admin_id):
 
 LEADERBOARD_URL = "https://notes-share.smolevich90.workers.dev/api/smolevich-ai-bot/free-models"
 LEADERBOARD_CACHE_TTL_SEC = 300
-PROVIDER_CODES = {"openrouter": "o", "groq": "g", "cerebras": "c", "nvidia": "n"}
+PROVIDER_CODES = {"openrouter": "o", "groq": "g", "nvidia": "n"}
 PROVIDER_BY_CODE = {v: k for k, v in PROVIDER_CODES.items()}
 
 leaderboardCache = {"ts": 0.0, "payload": None}
@@ -1841,10 +1841,14 @@ def build_provider_health_text():
     dead = [r["provider"] for r in rows if not r["live"]]
     if dead:
         lines.append(f"\n⚠️ Полностью мёртвые: {', '.join(dead)}. Проверь ключ и биллинг.")
-    parked = [s for s in DB.get_provider_state() if int(s.get("disabled_until") or 0) > now]
-    for s in parked:
-        left_h = max(0, (int(s["disabled_until"]) - now) // 3600)
-        lines.append(f"\n⛔️ {s['provider']} снят с обстрела ещё на {left_h} ч: {str(s.get('reason') or '')[:90]}")
+    for s in DB.get_provider_state():
+        until = int(s.get("disabled_until") or 0)
+        reason = str(s.get("reason") or "")[:90]
+        if until == PROVIDER_PARKED_UNTIL_HUMAN:
+            lines.append(f"\n⛔️ {s['provider']} выключен до ручного включения: {reason}")
+        elif until > now:
+            left_h = max(0, (until - now) // 3600)
+            lines.append(f"\n⛔️ {s['provider']} снят с обстрела ещё на {left_h} ч: {reason}")
     return "\n".join(lines)
 
 

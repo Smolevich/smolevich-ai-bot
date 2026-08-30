@@ -34,15 +34,6 @@ PROVIDERS: dict[str, dict[str, Any]] = {
         "supports_tools": True,
         "proxy": False,
     },
-    "cerebras": {
-        "url": "https://api.cerebras.ai/v1/chat/completions",
-        "models_url": "https://api.cerebras.ai/v1/models",
-        "key_env": "CEREBRAS_API_KEY",
-        "key_file": "/etc/socks-monitor/.cerebras_key",
-        "default_model": "llama-3.3-70b",
-        "supports_tools": False,
-        "proxy": False,
-    },
     "nvidia": {
         "url": "https://integrate.api.nvidia.com/v1/chat/completions",
         "models_url": "https://integrate.api.nvidia.com/v1/models",
@@ -55,3 +46,7 @@ PROVIDERS: dict[str, dict[str, Any]] = {
 }
 
 PROVIDER_DEFAULT = "openrouter"
+
+# provider_state.disabled_until sentinel: the provider wants money, so waiting changes
+# nothing — no probe and no note until a human puts it back.
+PROVIDER_PARKED_UNTIL_HUMAN = -1

@@ -58,7 +58,7 @@ class HarnessProviders(unittest.TestCase):
         self.assertEqual(tuple(mb.HARNESS_PROVIDERS), ("openrouter",))
 
     def test_the_providers_that_returned_1m_errors_are_excluded(self):
-        for provider in ("groq", "cerebras", "nvidia"):
+        for provider in ("groq", "nvidia"):
             self.assertNotIn(provider, mb.HARNESS_PROVIDERS)
 
 
@@ -71,8 +71,8 @@ class Throttling(unittest.TestCase):
         self.shared = shared
 
     def test_metered_providers_are_paced_for_their_ceiling(self):
-        """groq: 6000 tokens/min ÷ ~1500 an answer ≈ 4/min. cerebras: 4 requests/min."""
-        for provider in ("groq", "cerebras"):
+        """groq: 6000 tokens/min ÷ ~1500 an answer ≈ 4/min."""
+        for provider in ("groq",):
             self.assertGreaterEqual(self.shared.PROVIDER_PAUSE_SEC[provider], 12.0, provider)
             self.assertEqual(self.shared.PROVIDER_CONCURRENCY[provider], 1, provider)
 

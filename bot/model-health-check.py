@@ -3,6 +3,9 @@
 
 A provider whose free tier ends answers a terminal code on every model. Such a provider is
 parked for 24h and knocked on with a single model per run instead of the full sweep.
+
+A 402 is not an outage but a bill: waiting changes nothing, so the provider is parked
+until a human re-enables it — announced once, never probed again.
 """
 import json
 import logging
@@ -17,6 +20,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import NamedTuple, Sequence
+
+from agent.config import PROVIDER_PARKED_UNTIL_HUMAN as PARKED_UNTIL_HUMAN
 
 DB_FILE = "/var/lib/telegram-llm-bot.db"
 PROXY_FILE = "/etc/socks-monitor/.proxy_url"
@@ -48,6 +53,9 @@ OPENROUTER_DELAY_SEC = 1.5
 # 401/402/403 is the provider saying "not for you any more". 429 and 5xx say "not right now",
 # and a network error says nothing about the provider at all — neither may park anyone.
 TERMINAL_HTTP_CODES = frozenset({401, 402, 403})
+# 401/403 can be a key we rotate ourselves, so those get a day and another look. 402 cannot:
+# only a card fixes it, and re-checking it just posted the same note to the owner every 24h.
+PAYMENT_REQUIRED = 402
 DEAD_RUN_TERMINAL_SHARE = 0.9
 DEAD_RUNS_BEFORE_DISABLE = 3
 DISABLE_SEC = 24 * 3600
@@ -69,13 +77,6 @@ PROVIDERS = {
         "models_url": "https://api.groq.com/openai/v1/models",
         "key_file": "/etc/socks-monitor/.groq_key",
         "supports_tools": True,
-        "proxy": USE_PROXY,
-    },
-    "cerebras": {
-        "url": "https://api.cerebras.ai/v1/chat/completions",
-        "models_url": "https://api.cerebras.ai/v1/models",
-        "key_file": "/etc/socks-monitor/.cerebras_key",
-        "supports_tools": False,
         "proxy": USE_PROXY,
     },
     "nvidia": {
@@ -143,6 +144,17 @@ def shutdown_evidence(probes: Sequence[ModelProbe]) -> tuple[int, str] | None:
     return code, message
 
 
+def is_parked(disabled_until: int, now: int) -> bool:
+    return disabled_until == PARKED_UNTIL_HUMAN or disabled_until > now
+
+
+def run_plan(prev: ProviderState, now: int) -> str:
+    """What this run owes the provider: a full "sweep", one "probe", or "off" — nothing at all."""
+    if prev.disabled_until == PARKED_UNTIL_HUMAN:
+        return "off"
+    return "probe" if prev.disabled_until > now else "sweep"
+
+
 def next_state_after_run(prev: ProviderState, probes: Sequence[ModelProbe], now: int) -> tuple[ProviderState, str]:
     """New state and event ("disabled" | "recovered" | "") after a full sweep."""
     attempts = len([p for p in probes if p.category in TEXTUAL_CATEGORIES])
@@ -150,14 +162,17 @@ def next_state_after_run(prev: ProviderState, probes: Sequence[ModelProbe], now:
     if evidence is None:
         if not attempts:
             return prev, ""
-        event = "recovered" if prev.disabled_until > now else ""
+        event = "recovered" if is_parked(prev.disabled_until, now) else ""
         return ProviderState(0, "", 0, now), event
     code, message = evidence
     runs = prev.consecutive_dead_runs + 1
-    if runs < DEAD_RUNS_BEFORE_DISABLE or prev.disabled_until > now:
+    if runs < DEAD_RUNS_BEFORE_DISABLE:
         return ProviderState(prev.disabled_until, prev.reason, runs, now), ""
     reason = f"HTTP {code} on all {attempts} models: {message}".strip()[:300]
-    return ProviderState(now + DISABLE_SEC, reason, runs, now), "disabled"
+    until = PARKED_UNTIL_HUMAN if code == PAYMENT_REQUIRED else now + DISABLE_SEC
+    # A door that has been shut since the last park is the same news: extend the park, stay quiet.
+    event = "" if prev.reason else "disabled"
+    return ProviderState(until, reason, runs, now), event
 
 
 def next_state_after_probe(prev: ProviderState, probe: ModelProbe | None, now: int) -> tuple[ProviderState, str]:
@@ -361,7 +376,11 @@ def notify_admin(text: str) -> None:
 
 
 def announce(prov_name: str, state: ProviderState, event: str) -> None:
-    if event == "disabled":
+    if event == "disabled" and state.disabled_until == PARKED_UNTIL_HUMAN:
+        log.warning(f"{prov_name}: wants money ({state.reason}) — probes stopped until a human returns it")
+        notify_admin(f"🚫 {prov_name} выключен: провайдер просит денег, а не сломался.\n{state.reason}\n"
+                     f"Больше не проверяю — верни его руками, когда будет чем платить.")
+    elif event == "disabled":
         until = datetime.fromtimestamp(state.disabled_until, timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         log.warning(f"{prov_name}: shut its door ({state.reason}) — parked until {until}, one probe per run")
         notify_admin(f"🚫 {prov_name} убран из обстрела до {until}\n{state.reason}\n"
@@ -440,7 +459,11 @@ def probe_parked_provider(conn, prov_name, prev: ProviderState, now: int) -> Non
 def check_provider(conn, prov_name, openrouter_delay_sec=OPENROUTER_DELAY_SEC):
     started = int(time.time())
     prev = load_provider_state(conn, prov_name)
-    if prev.disabled_until > started:
+    plan = run_plan(prev, started)
+    if plan == "off":
+        log.info(f"{prov_name}: off until a human returns it ({prev.reason})")
+        return
+    if plan == "probe":
         probe_parked_provider(conn, prov_name, prev, started)
         return
     return sweep_provider(conn, prov_name, prev, openrouter_delay_sec)

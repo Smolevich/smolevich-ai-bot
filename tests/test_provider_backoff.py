@@ -3,8 +3,12 @@
 HuggingFace answered 402 to all ~130 models every 10 minutes from 11 May to 10 Aug 2026:
 three months of full sweeps against a closed door, 1.5M log lines, noticed by nobody.
 
+Cerebras then repeated it in the other direction: parked for 24h, unparked, swept, 402 again,
+parked again — one "убран из обстрела" note to the owner every single day since 17 Aug.
+
 Locked in here: only terminal codes (401/402/403) park a provider, 429 never does, one
-live model keeps the provider in, and a single successful knock brings it back.
+live model keeps the provider in, a single successful knock brings it back, and a 402 —
+a bill, not an outage — stops the probing entirely until a human turns the provider back on.
 
 Stdlib only, like the rest of the project.
 """
@@ -43,6 +47,13 @@ class ProviderShutdown(unittest.TestCase):
         state = mhc.ProviderState()
         for _ in range(3):
             state, event = sweep(state, probes(130, http_code=402, message="free tier ended"))
+        self.assertEqual(event, "disabled")
+        self.assertEqual(state.disabled_until, mhc.PARKED_UNTIL_HUMAN)
+
+    def test_401_parks_for_a_day_because_a_key_can_be_fixed(self):
+        state = mhc.ProviderState()
+        for _ in range(3):
+            state, event = sweep(state, probes(10, http_code=401))
         self.assertEqual(event, "disabled")
         self.assertEqual(state.disabled_until, NOW + 24 * 3600)
 
@@ -127,9 +138,65 @@ class ParkedProvider(unittest.TestCase):
         self.assertEqual((state.disabled_until, event), (self.parked.disabled_until, ""))
 
     def test_the_admin_is_told_once_not_every_run(self):
-        state, event = sweep(self.parked, probes(130, http_code=402), now=NOW + 60)
+        _, event = sweep(self.parked, probes(130, http_code=402), now=NOW + 60)
         self.assertEqual(event, "")
-        self.assertEqual(state.disabled_until, self.parked.disabled_until)
+
+    def test_a_parked_provider_is_knocked_on_not_swept(self):
+        self.assertEqual(mhc.run_plan(self.parked, NOW), "probe")
+
+    def test_an_expired_park_goes_back_to_the_full_sweep(self):
+        self.assertEqual(mhc.run_plan(self.parked, NOW + 7200), "sweep")
+
+
+class PaymentRequiredIsNotAnOutage(unittest.TestCase):
+    """Cerebras 402'd on every model from 17 Aug and re-announced itself every 24h."""
+
+    def park(self):
+        state = mhc.ProviderState()
+        for _ in range(3):
+            state, event = sweep(state, probes(2, http_code=402, message="Payment required"))
+        return state, event
+
+    def test_dead_provider_is_not_probed_and_not_announced(self):
+        state, _ = self.park()
+        for hours in (1, 25, 24 * 30):
+            later = NOW + hours * 3600
+            self.assertEqual(mhc.run_plan(state, later), "off", f"+{hours}h")
+        after, event = sweep(state, probes(2, http_code=402), now=NOW + 25 * 3600)
+        self.assertEqual(event, "")
+        self.assertEqual(after.disabled_until, mhc.PARKED_UNTIL_HUMAN)
+
+    def test_the_owner_hears_about_it_exactly_once(self):
+        state, first = self.park()
+        self.assertEqual(first, "disabled")
+        events = [sweep(state, probes(2, http_code=402), now=NOW + h * 3600)[1] for h in range(1, 73)]
+        self.assertEqual(set(events), {""})
+
+    def test_a_human_turning_it_back_on_restores_the_sweep(self):
+        state, _ = self.park()
+        revived = mhc.ProviderState(0, "", 0, NOW)
+        self.assertEqual(mhc.run_plan(revived, NOW), "sweep")
+        self.assertEqual(mhc.run_plan(state, NOW), "off")
+
+
+class RepeatedParkingStaysQuiet(unittest.TestCase):
+    def test_a_second_park_for_the_same_reason_is_not_announced_again(self):
+        state = mhc.ProviderState()
+        for _ in range(3):
+            state, event = sweep(state, probes(10, http_code=403))
+        self.assertEqual(event, "disabled")
+        expired = state._replace(disabled_until=NOW - 1)
+        _, event = sweep(expired, probes(10, http_code=403), now=NOW)
+        self.assertEqual(event, "")
+
+    def test_a_door_that_opened_and_shut_again_is_announced_again(self):
+        state = mhc.ProviderState()
+        for _ in range(3):
+            state, _ = sweep(state, probes(10, http_code=403))
+        state, _ = sweep(state, probes(10, available=True), now=NOW + 600)
+        for _ in range(3):
+            state, event = sweep(state, probes(10, http_code=403), now=NOW + 1200)
+        self.assertEqual(event, "disabled")
 
 
 if __name__ == "__main__":

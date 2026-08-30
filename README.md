@@ -2,7 +2,7 @@
 
 [![Deploy to VDS](https://github.com/Smolevich/smolevich-ai-bot/actions/workflows/deploy.yml/badge.svg?branch=main)](https://github.com/Smolevich/smolevich-ai-bot/actions/workflows/deploy.yml)
 
-A Telegram bot that gives you one chat interface in front of several LLM providers. Today it's pointed primarily at the **free tiers** of OpenRouter, Groq, Cerebras and NVIDIA — picking which provider/model to use is a `/provider` and `/models` away. The free-only focus is a deliberate cost choice for now, not a hard design constraint; nothing in the code prevents adding paid endpoints later, and that may well happen as free quotas tighten.
+A Telegram bot that gives you one chat interface in front of several LLM providers. Today it's pointed primarily at the **free tiers** of OpenRouter, Groq and NVIDIA — picking which provider/model to use is a `/provider` and `/models` away. The free-only focus is a deliberate cost choice for now, not a hard design constraint; nothing in the code prevents adding paid endpoints later, and that may well happen as free quotas tighten.
 
 ## What it does
 

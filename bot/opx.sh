@@ -29,7 +29,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$SESSION" || -z "$TASK" ]]; then
-  echo "Usage: opx --session <id> --provider <openrouter|groq|cerebras|nvidia> --task <text> [--model <slug>]" >&2
+  echo "Usage: opx --session <id> --provider <openrouter|groq|nvidia> --task <text> [--model <slug>]" >&2
   exit 2
 fi
 
@@ -63,7 +63,7 @@ fi
 OPENROUTER_KEY="$(cat "$OPENROUTER_KEY_FILE")"
 
 case "$PROVIDER" in
-  openrouter|groq|cerebras|nvidia) ;;
+  openrouter|groq|nvidia) ;;
   *) echo "Unsupported provider: $PROVIDER" >&2; exit 2 ;;
 esac
 

@@ -8,7 +8,7 @@ Runtime secrets (provider keys, `MODEL_LEADERBOARD_TOKEN`, proxy URL) are stored
 
 - Config: `/etc/socks-monitor/config.json`
 - Admin ID: `/etc/socks-monitor/.admin_id`
-- Provider keys: `/etc/socks-monitor/.<provider>_key` (openrouter, groq, cerebras, nvidia)
+- Provider keys: `/etc/socks-monitor/.<provider>_key` (openrouter, groq, nvidia)
 - DB: `/var/lib/telegram-llm-bot.db` — shared between the bot, all health-check crons, and the benchmark.
 - Sandbox sessions: `/var/lib/smolevich-ai-bot/sessions`
 - Migrations dir on server: `/usr/local/bin/migrations/`

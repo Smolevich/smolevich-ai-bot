@@ -1,10 +1,10 @@
 """A harness run must go to a provider that can actually answer it.
 
 Measured 2026-08-12 on the live box: the benchmark's claude runs succeed on
-openrouter and fail on groq/cerebras/nvidia with "Internal error: There's an
+openrouter and fail on groq/nvidia with "Internal error: There's an
 issue with the selected model (…[1m])" — claude-code speaks the Anthropic
 Messages protocol at an endpoint that does not implement it. pi speaks native
-APIs but only gets a key for openrouter/groq/cerebras; on nvidia it 401s.
+APIs but only gets a key for openrouter/groq; on nvidia it 401s.
 
 Stdlib only, like the rest of the project.
 """
@@ -48,8 +48,9 @@ class PiMode(unittest.TestCase):
     def test_pi_keeps_groq_because_it_has_that_key(self):
         self.assertFalse(target("pi", "groq")[2])
 
-    def test_pi_keeps_cerebras(self):
-        self.assertFalse(target("pi", "cerebras")[2])
+    def test_pi_reroutes_a_provider_we_no_longer_run(self):
+        """cerebras was retired on 31 Aug 2026; a stale session must not be sent there."""
+        self.assertTrue(target("pi", "cerebras")[2])
 
     def test_pi_reroutes_nvidia_which_has_no_key_mapping(self):
         self.assertTrue(target("pi", "nvidia")[2])

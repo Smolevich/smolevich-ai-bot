@@ -143,7 +143,6 @@ jobs:
             }
             V_OPENROUTER=$(vv OPENROUTER_API_KEY OPENROUTER_API_KEY)
             V_GROQ=$(vv GROQ_API_KEY GROQ_API_KEY)
-            V_CEREBRAS=$(vv CEREBRAS_API_KEY CEREBRAS_API_KEY)
             V_NVIDIA=$(vv NVIDIA_API_KEY NVIDIA_API_KEY)
             V_LEADERBOARD=$(vv MODEL_LEADERBOARD_TOKEN MODEL_LEADERBOARD_TOKEN)
             V_PROXY=$(vv BOT_PROXY_URL PROXY_URL)
@@ -151,7 +150,7 @@ jobs:
             V_TEMPORAL_ADDR=$(vv TEMPORAL_ADDRESS TEMPORAL_ADDRESS || true)
             V_TEMPORAL_NS=$(vv TEMPORAL_NAMESPACE TEMPORAL_NAMESPACE || true)
             V_TEMPORAL_KEY=$(vv TEMPORAL_API_KEY TEMPORAL_API_KEY || true)
-            for v in V_OPENROUTER V_GROQ V_CEREBRAS V_NVIDIA V_LEADERBOARD; do
+            for v in V_OPENROUTER V_GROQ V_NVIDIA V_LEADERBOARD; do
               if [ -z "${!v}" ]; then echo "ERROR: $v пуст и в Vault, и в .env" >&2; exit 1; fi
             done
 
@@ -178,7 +177,6 @@ jobs:
             BOT_PROXY_DISABLED=$BOT_PROXY_DISABLED
             OPENROUTER_API_KEY=$V_OPENROUTER
             GROQ_API_KEY=$V_GROQ
-            CEREBRAS_API_KEY=$V_CEREBRAS
             NVIDIA_API_KEY=$V_NVIDIA
             MODEL_LEADERBOARD_TOKEN=$V_LEADERBOARD
             TEMPORAL_ADDRESS=$V_TEMPORAL_ADDR
@@ -196,12 +194,12 @@ jobs:
 
             # Provider key files from Vault — fallback for the health/audio/media cron probes,
             # which run the binaries directly and do NOT source .env.
-            for pair in "openrouter:$V_OPENROUTER" "groq:$V_GROQ" "cerebras:$V_CEREBRAS" "nvidia:$V_NVIDIA"; do
+            for pair in "openrouter:$V_OPENROUTER" "groq:$V_GROQ" "nvidia:$V_NVIDIA"; do
               name=${pair%%:*}; val=${pair#*:}
               sudo install -m 0600 /dev/null /etc/socks-monitor/.${name}_key
               printf '%s' "$val" | sudo tee /etc/socks-monitor/.${name}_key >/dev/null
             done
-            sudo rm -f /etc/socks-monitor/.hf_key
+            sudo rm -f /etc/socks-monitor/.hf_key /etc/socks-monitor/.cerebras_key
 
             # One-time migration off the legacy vds-agent naming; no-op once renamed.
             if [ -f /etc/systemd/system/vds-agent.service ]; then

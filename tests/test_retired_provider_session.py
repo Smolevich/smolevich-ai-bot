@@ -74,6 +74,14 @@ class RetiredProviderSession(unittest.TestCase):
     def test_huggingface_is_gone_from_providers(self):
         self.assertNotIn("huggingface", PROVIDERS)
 
+    def test_cerebras_is_gone_from_providers(self):
+        """Free tier ended 17 Aug 2026 — the account needs a card, so every model 402s."""
+        self.assertNotIn("cerebras", PROVIDERS)
+
+    def test_a_cerebras_session_falls_back_to_the_default(self):
+        seed_session(4, "cerebras", "llama-3.3-70b")
+        self.assertEqual(DB.get_session(4)["provider"], PROVIDER_DEFAULT)
+
 
 if __name__ == "__main__":
     unittest.main()
