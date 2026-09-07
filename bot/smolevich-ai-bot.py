@@ -38,7 +38,7 @@ from agent.text import (
     estimate_tokens,
     sanitize_model_id,
 )
-from agent import model_routing
+from agent import model_routing, quota
 from agent.entities import normalize_list_markers, parse_markdown_to_entities
 from agent.provider_api import available_providers, load_provider_key, make_opener
 from agent.telegram_api import tg_get_file_bytes, tg_request, tg_send_document_bytes, tg_send_long_text, tg_send_text, multipart_body
@@ -1410,8 +1410,10 @@ def send_users_text(token, uid, admin_id):
 
 def send_tts_audio(token, uid, source_text):
     from agent.telegram_api import tg_send_chat_action
-    tg_send_chat_action(token, uid, action="upload_document")
     sess = DB.get_session(uid)
+    if not allow_voice_use(uid, "tts", token, is_en=sess.get("ui_lang", "ru") == "en"):
+        return
+    tg_send_chat_action(token, uid, action="upload_document")
     try:
         t0 = time.time()
         source_text = source_text.strip()
@@ -1538,27 +1540,11 @@ def handle_callback(cb, token, admin_id):
                 tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Failed to update model", "show_alert": True})
         else:
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Model updated"})
-    elif data == "check_sub":
-        if is_subscribed(token, uid):
-            DB.set_allowed(uid, True)
-            tg_request(token, "editMessageText", {"chat_id": cb["message"]["chat"]["id"], "message_id": cb["message"]["message_id"], "text": "✅"})
-            welcome_after_gate(uid, token, admin_id)
-        else: tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "❌ Not subscribed!", "show_alert": True})
-    elif data == "request_access":
-        if is_subscribed(token, uid):
-            DB.set_allowed(uid, True)
-            tg_request(token, "editMessageText", {"chat_id": cb["message"]["chat"]["id"], "message_id": cb["message"]["message_id"], "text": "✅"})
-            welcome_after_gate(uid, token, admin_id)
-            return
-        uname = cb.get("from", {}).get("username") or f"{cb.get('from', {}).get('first_name', '')} {cb.get('from', {}).get('last_name', '')}".strip()
-        uname = f"@{uname}" if uname and not str(uname).startswith("@") else (uname or f"ID: {uid}")
-        admin_kb = [[
-            {"text": f"✅ Approve {uid}", "callback_data": f"approve:{uid}"},
-            {"text": f"❌ Deny {uid}", "callback_data": f"deny:{uid}"}
-        ]]
-        txt_parsed, ents = parse_markdown_to_entities(f"🔔 New user {uname} (`{uid}`) wants access.")
-        tg_request(token, "sendMessage", {"chat_id": admin_id, "text": txt_parsed, "entities": ents, "reply_markup": {"inline_keyboard": admin_kb}})
-        tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Запрос отправлен админу"})
+    elif data in ("check_sub", "request_access"):
+        # Old gate messages still sit in people's chats. There is nothing to check now.
+        DB.set_allowed(uid, True)
+        tg_request(token, "editMessageText", {"chat_id": cb["message"]["chat"]["id"], "message_id": cb["message"]["message_id"], "text": "✅"})
+        welcome_after_gate(uid, token, admin_id)
     elif data.startswith("set_debug:"):
         if uid != admin_id:
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Недоступно", "show_alert": True})
@@ -1982,33 +1968,27 @@ def build_top_text():
     return txt
 
 def ensure_access(uid, username, token, admin_id):
-    """True if this person may use the bot; otherwise show the gate and return False."""
-    if uid == admin_id:
-        DB.update_and_check(uid, username)
-        return True
-    if DB.update_and_check(uid, username):
-        return True
-    if is_subscribed(token, uid):
+    """Everyone is in. The row is still written — the fleet digest counts people here.
+
+    The channel-subscription gate is gone: it was where most first-timers stopped, and
+    what it protected costs nothing per text question. What does cost per call —
+    transcription and voicing — is capped by the hour instead, in `allow_voice_use`.
+    """
+    if not DB.update_and_check(uid, username) and uid != admin_id:
         DB.set_allowed(uid, True)
-        return True
-    kb = [
-        [{"text": f"📢 Подписаться на {REQUIRED_CHANNEL}", "url": f"https://t.me/{REQUIRED_CHANNEL.lstrip('@')}"}],
-        [{"text": "✅ Я подписался — проверить", "callback_data": "check_sub"}],
-        [{"text": "📝 Запросить доступ без подписки", "callback_data": "request_access"}],
-    ]
-    welcome = (
-        "Привет! Я AI-ассистент.\n\n"
-        "Что умею:\n"
-        "💬 Чат с большими моделями (бесплатные, без VPN)\n"
-        "🎙 Расшифровка голосовых сообщений\n"
-        "🛠 Запуск кода в песочнице\n\n"
-        f"Чтобы начать, подпишись на канал {REQUIRED_CHANNEL} — после этого доступ откроется автоматически. "
-        "Или нажми «Запросить доступ» и я отправлю заявку админу."
-    )
-    # The gate is where most first-timers stop, so it has to be countable.
-    DB.log_ui_event(uid, "gate", "shown")
-    tg_request(token, "sendMessage", {"chat_id": uid, "text": welcome, "reply_markup": {"inline_keyboard": kb}})
-    return False
+    return True
+
+
+def allow_voice_use(uid, kind, token, is_en=False):
+    """True if this transcription/voicing fits under the hourly ceiling; else say when."""
+    now = int(time.time())
+    allowed, retry_at = quota.voice_quota(DB.count_voice_uses(uid, kind), now)
+    if not allowed:
+        DB.log_ui_event(uid, "quota", kind)
+        tg_send_text(token, uid, quota.voice_limit_message(retry_at, now, kind=kind, is_en=is_en))
+        return False
+    DB.log_voice_use(uid, kind)
+    return True
 
 
 def process_update(upd, token, admin_id):
@@ -2160,6 +2140,8 @@ def process_update(upd, token, admin_id):
             return
 
         if (stt_pending or auto_stt_model) and ("voice" in msg or "audio" in msg or "document" in msg):
+            if not allow_voice_use(uid, "stt", token, is_en=sess_for_media.get("ui_lang", "ru") == "en"):
+                return
             try:
                 media = msg.get("voice") or msg.get("audio") or msg.get("document")
                 media_size = int(media.get("file_size") or 0)

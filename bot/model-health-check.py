@@ -466,7 +466,31 @@ def check_provider(conn, prov_name, openrouter_delay_sec=OPENROUTER_DELAY_SEC):
     if plan == "probe":
         probe_parked_provider(conn, prov_name, prev, started)
         return
-    return sweep_provider(conn, prov_name, prev, openrouter_delay_sec)
+    result = sweep_provider(conn, prov_name, prev, openrouter_delay_sec)
+    retire_unseen_models(conn, prov_name, started)
+    return result
+
+
+def retire_unseen_models(conn, prov_name, run_start):
+    """Mark text models the provider no longer lists as unavailable.
+
+    The sweep builds its work list from the provider's own /v1/models, and writes rows
+    only for what it finds. A model that disappears is therefore never touched again and
+    its row freezes at whatever it last said. nvidia/nemotron-3-nano-30b-a3b froze on
+    2026-09-01 and kept being handed to people, who got HTTP 410 for six days.
+
+    The row is kept, not deleted: the next sweep that sees the model writes available=1
+    over it and the model comes straight back.
+    """
+    placeholders = ",".join("?" for _ in TEXTUAL_CATEGORIES)
+    cur = conn.execute(
+        f"UPDATE model_health SET available = 0 "
+        f"WHERE provider = ? AND category IN ({placeholders}) AND last_check < ? AND available = 1",
+        (prov_name, *TEXTUAL_CATEGORIES, run_start))
+    conn.commit()
+    if cur.rowcount:
+        log.info(f"{prov_name}: retired {cur.rowcount} models the provider no longer lists")
+    return cur.rowcount
 
 
 def sweep_provider(conn, prov_name, prev, openrouter_delay_sec=OPENROUTER_DELAY_SEC):

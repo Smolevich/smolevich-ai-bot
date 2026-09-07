@@ -51,12 +51,22 @@ class AccessGate(unittest.TestCase):
             self.assertTrue(bot.ensure_access(STRANGER, "u", "token", ADMIN))
         send.assert_not_called()
 
-    def test_gate_shows_the_invite_to_everyone_else(self):
+    def test_an_unknown_telegram_id_gets_an_answer_and_not_a_refusal(self):
+        """The channel-subscription gate is gone: the bot is open to everyone."""
         with mock.patch.object(bot.DB, "update_and_check", return_value=False), \
-             mock.patch.object(bot, "is_subscribed", return_value=False), \
+             mock.patch.object(bot.DB, "set_allowed") as allow, \
              mock.patch.object(bot, "tg_request") as send:
-            self.assertFalse(bot.ensure_access(STRANGER, "u", "token", ADMIN))
-        send.assert_called_once()
+            self.assertTrue(bot.ensure_access(STRANGER, "u", "token", ADMIN))
+        send.assert_not_called()
+        allow.assert_called_once()
+
+    def test_a_first_time_stranger_is_recorded_in_the_database(self):
+        """The fleet digest counts people from the users table, not from the log."""
+        with mock.patch.object(bot.DB, "update_and_check", return_value=False) as seen, \
+             mock.patch.object(bot.DB, "set_allowed"), \
+             mock.patch.object(bot, "tg_request"):
+            bot.ensure_access(STRANGER, "vasya", "token", ADMIN)
+        seen.assert_called_once_with(STRANGER, "vasya")
 
 
 class PhotoIsAnswered(unittest.TestCase):
