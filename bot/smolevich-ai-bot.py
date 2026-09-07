@@ -33,10 +33,12 @@ from agent.config import (
     TUNNEL_URL,
 )
 from agent.text import (
+    answer_from_message,
     compact_messages_for_provider,
     estimate_tokens,
     sanitize_model_id,
 )
+from agent import model_routing
 from agent.entities import normalize_list_markers, parse_markdown_to_entities
 from agent.provider_api import available_providers, load_provider_key, make_opener
 from agent.telegram_api import tg_get_file_bytes, tg_request, tg_send_document_bytes, tg_send_long_text, tg_send_text, multipart_body
@@ -708,6 +710,30 @@ def format_wait_time(seconds):
     if seconds < 3600: return f"{int(seconds // 60)}m {int(seconds % 60)}s"
     return f"{int(seconds // 3600)}h {int((seconds % 3600) // 60)}m"
 
+def retry_after_seconds(headers):
+    """Seconds until this endpoint is worth trying again, or None when it did not say.
+
+    Providers answer in three dialects: seconds, an epoch in seconds, an epoch in ms.
+    A missing header used to end up printed to the user as the literal "(None)".
+    """
+    raw = None
+    try:
+        raw = headers.get("Retry-After") or headers.get("x-ratelimit-reset")
+    except Exception:
+        return None
+    if raw in (None, ""):
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if value > 1e11:
+        value /= 1000
+    if value > 1e9:
+        value -= time.time()
+    return max(0.0, value)
+
+
 def format_bytes(size: int) -> str:
     if size < 1024:
         return f"{size} B"
@@ -760,7 +786,8 @@ def fetch_openrouter_key_limits(api_key: str) -> dict:
 
 def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tools=True, use_proxy=False):
     usage = {"prompt_tokens": 0, "completion_tokens": 0}
-    meta = {"finish_reason": None, "tool_calls_total": 0, "error": None, "http_latency_ms": 0, "rate_limits": {}}
+    meta = {"finish_reason": None, "tool_calls_total": 0, "error": None, "http_latency_ms": 0,
+            "rate_limits": {}, "status": None, "retry_after_sec": None}
     roles = [m.get("role", "?") for m in messages]
     log.info(f"ask_llm: model={model} tools={use_tools} proxy={use_proxy} msgs={len(messages)} roles={roles} est_tokens={estimate_tokens(messages)}")
     opener = make_opener(use_proxy)
@@ -774,6 +801,10 @@ def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tool
     retry_use_tools = use_tools
     for attempt in range(10):
         payload = {"model": model, "messages": messages, "max_tokens": 4096}
+        # OpenRouter returns the chain of thought unless asked not to; other providers 400 on
+        # unknown fields, so the switch is scoped to the one API that documents it.
+        if "openrouter.ai" in (api_url or ""):
+            payload["reasoning"] = {"exclude": True}
         if retry_use_tools: payload.update({"tools": tools_for(uid == admin_id), "tool_choice": "auto"})
         req = urllib.request.Request(api_url, json.dumps(payload).encode(), req_headers)
         try:
@@ -787,7 +818,7 @@ def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tool
                 finish = res["choices"][0].get("finish_reason", "?")
                 meta["finish_reason"] = finish
                 if not msg.get("tool_calls"):
-                    content = (msg.get("content") or "").strip()
+                    content = answer_from_message(msg)
                     log.info(f"ask_llm response: finish={finish} content_len={len(content)} tool_calls=0")
                     if content:
                         # If the model was cut off by max_tokens, request continuation.
@@ -808,7 +839,7 @@ def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tool
                                         usage["completion_tokens"] += cu.get("completion_tokens", 0)
                                         cont_msg = cont_res["choices"][0]["message"]
                                         cont_finish = cont_res["choices"][0].get("finish_reason", "?")
-                                        cont_text = (cont_msg.get("content") or "").strip()
+                                        cont_text = answer_from_message(cont_msg)
                                         if cont_text:
                                             full_content += "\n" + cont_text
                                         messages.append(cont_msg)
@@ -822,7 +853,8 @@ def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tool
                         return content, usage, meta
                     log.warning(f"Empty model response. model={model} finish={finish} raw_keys={list(msg.keys())}")
                     meta["error"] = "empty_response"
-                    return "No response", usage, meta
+                    # An empty body is a failure like any other: the next model gets a turn.
+                    return None, usage, meta
                 meta["tool_calls_total"] += len(msg["tool_calls"])
                 log.info(f"ask_llm response: finish={finish} tool_calls={len(msg['tool_calls'])} funcs={[tc['function']['name'] for tc in msg['tool_calls']]}")
                 messages.append(msg)
@@ -864,40 +896,100 @@ def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tool
             except Exception:
                 pass
             meta["error"] = f"HTTP {e.code}"
+            meta["status"] = e.code
             meta["rate_limits"] = extract_rate_limit_headers(e.headers)
+            meta["retry_after_sec"] = retry_after_seconds(e.headers)
             err_body = ""
             try:
                 err_body = e.read().decode(errors="replace")
             except Exception:
                 err_body = ""
-            hint = ""
-            if e.code == 404: return f"Эта модель сейчас не отвечает. Выбери другую в списке.{hint}", usage, meta
-            if e.code == 429:
-                val = e.headers.get("Retry-After") or e.headers.get("x-ratelimit-reset")
-                try:
-                    v = float(val); v = v/1000 if v > 1e11 else v
-                    if v > 1e9: v -= time.time()
-                    wait_info = f" (Retry in {format_wait_time(max(0, v))})"
-                except: wait_info = f" ({val})"
-                return f"У этой модели кончился бесплатный лимит{wait_info}. Возьми другую из списка.{hint}", usage, meta
             if err_body:
                 log.warning(f"HTTP {e.code} from provider for model={model}: {err_body[:400]}")
-            return f"Не получилось получить ответ. Попробуй другую модель.{hint}", usage, meta
+            # No user-facing text here: the caller knows the fallback chain and decides what,
+            # if anything, the human is told. A refusal string returned as an answer is what
+            # made the bot say "pick another model" instead of picking one itself.
+            return None, usage, meta
         except Exception as e:
             try:
                 meta["http_latency_ms"] += int((time.time() - t_http) * 1000)
             except Exception:
                 pass
             meta["error"] = str(e)[:200]
-            log.error(f"ask_llm error: {e}"); return f"❌ Error: {e}", usage, meta
+            log.error(f"ask_llm error: {e}")
+            return None, usage, meta
     meta["error"] = "loop_limit"
-    return "❌ Agent loop limit reached.", usage, meta
+    return None, usage, meta
 
 def compact_history(api_url, api_key, model, history, uid, admin_id, use_proxy=False):
     to_sum = history[:-4]; keep = history[-4:]
     p = [{"role": "system", "content": "Summarize concisely."}] + to_sum
     sum_text, _, _ = ask_llm(api_url, api_key, model, p, uid=uid, admin_id=admin_id, use_tools=False, use_proxy=use_proxy)
+    if not sum_text:
+        # Summarising failed; dropping the old turns still keeps the context under the cap.
+        return keep
     return [{"role": "system", "content": f"Summary: {sum_text}"}] + keep
+
+
+def live_model_ranking():
+    """Every model that can answer right now, best first.
+
+    Order: answers solved in the last measurement, then how often the model answered at
+    all in the past day. Models the probe could not reach, models a parked provider owns,
+    and models that solved zero of ten are not in the list at all.
+    """
+    now = int(time.time())
+    parked = model_routing.parked_providers(DB.get_provider_state(), now)
+    usable = set(available_providers()) - parked
+    rows = [r for r in DB.get_live_text_rows() if r["provider"] in usable]
+    live = model_routing.live_candidates(rows, now, parked=parked)
+    latency = {(r["provider"], r["model_id"]): r.get("latency_ms", 0) for r in rows}
+    board = ((fetch_leaderboard() or {}).get("models") or [])
+    return model_routing.rank_candidates(board, live, DB.get_success_rates(), latency)
+
+
+def pick_leader():
+    """The model an unpinned session answers with. Recomputed from the ranking every time."""
+    return model_routing.pick_default(live_model_ranking())
+
+
+def answer_with_fallback(uid, admin_id, sess, hist, prompt_text, sys_prompt):
+    """Ask the ranking in order until something answers.
+
+    Returns (answer|None, usage, meta, provider, model). Every attempt — including the
+    failed ones — becomes a request_log row, because the board and the digest see nothing
+    that is not in the database.
+    """
+    ranked = live_model_ranking()
+    current = (sess.get("provider") or PROVIDER_DEFAULT, sess.get("model") or "")
+    # Only a model the person picked themselves goes first; everyone else gets the leader
+    # of the latest measurement, recomputed on every question.
+    pinned = current if (sess.get("model_pinned") and current[1]) else None
+    chain = model_routing.fallback_chain(ranked, pinned)
+    if not chain and current[1]:
+        chain = [current]
+    usage = {"prompt_tokens": 0, "completion_tokens": 0}
+    meta = {"finish_reason": None, "tool_calls_total": 0, "error": "no_live_models",
+            "http_latency_ms": 0, "rate_limits": {}, "status": None, "retry_after_sec": None}
+    provider, model = current
+    for provider, model in chain:
+        prov = PROVIDERS.get(provider) or PROVIDERS[PROVIDER_DEFAULT]
+        api_key = load_provider_key(provider) or load_provider_key(PROVIDER_DEFAULT)
+        caps = capabilities_for_model(provider, model)
+        use_tools = sess.get("tools_enabled", True) and prov.get("supports_tools", True) and ("tools" in caps)
+        messages = [{"role": "system", "content": sys_prompt}] + hist + [{"role": "user", "content": prompt_text}]
+        ans, usage, meta = ask_llm(prov["url"], api_key, model, messages, uid=uid, admin_id=admin_id,
+                                   use_tools=use_tools, use_proxy=prov.get("proxy", False))
+        if ans:
+            return ans, usage, meta, provider, model
+        DB.log_request(uid, provider, model, usage["prompt_tokens"], usage["completion_tokens"],
+                       meta.get("finish_reason"), meta.get("tool_calls_total", 0), meta.get("error"),
+                       mode="native", request_http_ms=meta.get("http_latency_ms", 0))
+        log.warning(f"fallback: {provider}/{model} failed with {meta.get('error')}, trying the next one")
+        if not model_routing.is_retryable(meta.get("status")):
+            break
+    return None, usage, meta, provider, model
+
 
 def ensure_dir(path):
     try:
@@ -1402,7 +1494,7 @@ def handle_callback(cb, token, admin_id):
             return
         default_model = DB.pick_default_text_model(prov_name) or PROVIDERS[prov_name]["default_model"]
         default_tools = PROVIDERS[prov_name].get("supports_tools", True)
-        DB.save_session(uid, default_model, sess["history"], provider=prov_name, tools_enabled=default_tools, engine_mode=sess.get("engine_mode", "native"))
+        DB.save_session(uid, default_model, sess["history"], provider=prov_name, tools_enabled=default_tools, engine_mode=sess.get("engine_mode", "native"), model_pinned=True)
         tg_request(token, "editMessageText", {"chat_id": cb["message"]["chat"]["id"], "message_id": cb["message"]["message_id"], "text": f"💬 Отвечает {default_model}. Спрашивай.", "reply_markup": {"inline_keyboard": [[{"text": "← Назад", "callback_data": "menu:back"}]]}})
     elif data.startswith("try:"):
         # Straight from a leaderboard row: switch provider and model together, stay on the list.
@@ -1414,9 +1506,10 @@ def handle_callback(cb, token, admin_id):
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "❌", "show_alert": True})
             return
         model = sanitize_model_id(model)
+        # Chosen by hand: pin it, or the next question would silently go to the leader.
         DB.save_session(uid, model, sess["history"], provider=prov_name,
                         tools_enabled=PROVIDERS[prov_name].get("supports_tools", True),
-                        engine_mode=sess.get("engine_mode", "native"))
+                        engine_mode=sess.get("engine_mode", "native"), model_pinned=True)
         short = model.split("/")[-1] if "/" in model else model
         tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"],
                                                   "text": (f"Answering with {short}" if is_en else f"Отвечаю моделью {short}")})
@@ -1437,7 +1530,7 @@ def handle_callback(cb, token, admin_id):
                 "show_alert": True,
             })
             return
-        DB.save_session(uid, m, sess["history"], provider=sess["provider"], tools_enabled=sess["tools_enabled"], engine_mode=sess.get("engine_mode", "native"))
+        DB.save_session(uid, m, sess["history"], provider=sess["provider"], tools_enabled=sess["tools_enabled"], engine_mode=sess.get("engine_mode", "native"), model_pinned=True)
         is_en = sess.get("ui_lang", "ru") == "en"
         short = m.split("/")[-1] if "/" in m else m
         # Latency, category and "supports tools" are our plumbing; a person needs to know
@@ -2222,9 +2315,6 @@ def process_update(upd, token, admin_id):
         prov = PROVIDERS.get(provider, PROVIDERS[PROVIDER_DEFAULT])
         api_key = load_provider_key(provider) or load_provider_key(PROVIDER_DEFAULT)
         use_proxy = prov.get("proxy", False)
-        
-        model_caps = capabilities_for_model(provider, model)
-        use_tools = sess.get("tools_enabled", True) and prov.get("supports_tools", True) and ("tools" in model_caps)
 
         if estimate_tokens(hist) > MAX_CONTEXT_TOKENS:
             hist = compact_history(prov["url"], api_key, model, hist, uid, admin_id, use_proxy=use_proxy)
@@ -2246,12 +2336,18 @@ def process_update(upd, token, admin_id):
                 tg_send_text(token, uid, f"ℹ️ Режим {agent_name} работает только на {_p} — отвечаю моделью {_m}.")
             ans, usage, meta = ask_via_acpx(uid, text, sess)
         else:
-            prompt_messages = [{"role": "system", "content": sys_prompt}] + hist + [{"role": "user", "content": text}]
-            ans, usage, meta = ask_llm(prov["url"], api_key, model,
-                                 prompt_messages,
-                                 uid=uid, admin_id=admin_id, use_tools=use_tools, use_proxy=use_proxy)
-        if ans == "No response":
-            ans = "Модель вернула пустой ответ. Попробуй другую из списка."
+            ans, usage, meta, provider, model = answer_with_fallback(uid, admin_id, sess, hist, text, sys_prompt)
+        if not ans:
+            # Every candidate refused. This is the only moment the person hears about it,
+            # and they hear it without model ids, provider names or HTTP codes.
+            stop_typing()
+            with inflightUsersLock:
+                inflightUsers.discard(uid)
+                inflightBusyNoticeTs.pop(uid, None)
+            tg_send_text(token, uid, model_routing.all_failed_message(
+                is_en=sess.get("ui_lang", "ru") == "en",
+                retry_after_sec=meta.get("retry_after_sec")))
+            return
         DB.add_usage(uid, usage['prompt_tokens'], usage['completion_tokens'])
         req_id = DB.log_request(uid, provider, model, usage['prompt_tokens'], usage['completion_tokens'],
                                 meta['finish_reason'], meta['tool_calls_total'], meta['error'], mode=sess.get("engine_mode", "native"), request_http_ms=meta.get("http_latency_ms", 0))
@@ -2264,11 +2360,14 @@ def process_update(upd, token, admin_id):
         hist.append({"role": "user", "content": text}); hist.append({"role": "assistant", "content": ans})
         # Avoid clobbering mode/tools with stale in-memory session when updates are processed concurrently.
         latest = DB.get_session(uid)
+        # A chosen model survives a fallback: the person keeps it for the next question.
+        stored_provider = sess.get("provider") if latest.get("model_pinned") else provider
+        stored_model = sess.get("model") if latest.get("model_pinned") else model
         DB.save_session(
             uid,
-            model,
+            stored_model,
             hist,
-            provider=provider,
+            provider=stored_provider,
             tools_enabled=latest.get("tools_enabled", sess.get("tools_enabled", True)),
             engine_mode=latest.get("engine_mode", sess.get("engine_mode", "native")),
         )

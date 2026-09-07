@@ -53,9 +53,24 @@ class DB:
                 except Exception:
                     pass
                 try:
+                    conn.execute("ALTER TABLE sessions ADD COLUMN model_pinned INTEGER NOT NULL DEFAULT 0")
+                except Exception:
+                    pass
+                try:
                     conn.execute("ALTER TABLE users ADD COLUMN message_count INTEGER DEFAULT 0")
                 except Exception:
                     pass
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS voice_usage (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ts INTEGER NOT NULL,
+                        uid INTEGER NOT NULL,
+                        kind TEXT NOT NULL
+                    )
+                    """
+                )
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_voice_usage_uid ON voice_usage(uid, kind, ts)")
                 try:
                     conn.execute(
                         "ALTER TABLE request_log ADD COLUMN mode TEXT DEFAULT 'native'"
@@ -152,7 +167,7 @@ class DB:
     def get_session(uid):
         try:
             with DB.connectDb() as conn:
-                res = conn.execute("SELECT model, history_json, provider, tools_enabled, engine_mode, COALESCE(last_session_id, ''), COALESCE(profile, 'beginner'), COALESCE(ui_lang, 'ru') FROM sessions WHERE user_id = ?", (uid,)).fetchone()
+                res = conn.execute("SELECT model, history_json, provider, tools_enabled, engine_mode, COALESCE(last_session_id, ''), COALESCE(profile, 'beginner'), COALESCE(ui_lang, 'ru'), COALESCE(model_pinned, 0) FROM sessions WHERE user_id = ?", (uid,)).fetchone()
                 if res:
                     prov = res[2] or PROVIDER_DEFAULT
                     model = sanitize_model_id(res[0])
@@ -167,33 +182,37 @@ class DB:
                     last_session_id = (res[5] if len(res) > 5 else None) or ""
                     profile = (res[6] if len(res) > 6 else None) or "beginner"
                     ui_lang = (res[7] if len(res) > 7 else None) or "ru"
-                    return {"model": model, "history": json.loads(res[1]), "provider": prov, "tools_enabled": tools_enabled == 1, "engine_mode": engine_mode, "last_session_id": last_session_id, "profile": profile, "ui_lang": ui_lang}
+                    pinned = bool(res[8]) if len(res) > 8 else False
+                    return {"model": model, "history": json.loads(res[1]), "provider": prov, "tools_enabled": tools_enabled == 1, "engine_mode": engine_mode, "last_session_id": last_session_id, "profile": profile, "ui_lang": ui_lang, "model_pinned": pinned}
                 # Brand-new session — pick historically best healthy text model; fall back to fastest healthy; then to static default.
                 chosen = DB.pick_default_text_model(PROVIDER_DEFAULT)
-                return {"model": chosen, "history": [], "provider": PROVIDER_DEFAULT, "tools_enabled": True, "engine_mode": "native", "last_session_id": "", "profile": "beginner", "ui_lang": "ru"}
+                return {"model": chosen, "history": [], "provider": PROVIDER_DEFAULT, "tools_enabled": True, "engine_mode": "native", "last_session_id": "", "profile": "beginner", "ui_lang": "ru", "model_pinned": False}
         except Exception as e:
             log.error(f"DB get_session: {e}")
-            return {"model": PROVIDERS[PROVIDER_DEFAULT]["default_model"], "history": [], "provider": PROVIDER_DEFAULT, "tools_enabled": True, "engine_mode": "native", "last_session_id": "", "profile": "beginner", "ui_lang": "ru"}
+            return {"model": PROVIDERS[PROVIDER_DEFAULT]["default_model"], "history": [], "provider": PROVIDER_DEFAULT, "tools_enabled": True, "engine_mode": "native", "last_session_id": "", "profile": "beginner", "ui_lang": "ru", "model_pinned": False}
     @staticmethod
-    def save_session(uid, model, history, provider=None, tools_enabled=True, engine_mode="native", ui_lang=None):
+    def save_session(uid, model, history, provider=None, tools_enabled=True, engine_mode="native", ui_lang=None, model_pinned=None):
+        """`model_pinned=None` leaves the pin as it was — only an explicit choice sets it."""
         try:
             model = sanitize_model_id(model)
             safe_ui_lang = ui_lang if ui_lang in ("ru", "en") else None
+            pin = None if model_pinned is None else (1 if model_pinned else 0)
             def op():
                 with DB.connectDb() as conn:
                     conn.execute(
                         """
-                        INSERT INTO sessions (user_id, model, history_json, provider, tools_enabled, engine_mode, ui_lang)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO sessions (user_id, model, history_json, provider, tools_enabled, engine_mode, ui_lang, model_pinned)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, 0))
                         ON CONFLICT(user_id) DO UPDATE SET
                             model=excluded.model,
                             history_json=excluded.history_json,
                             provider=excluded.provider,
                             tools_enabled=excluded.tools_enabled,
                             engine_mode=excluded.engine_mode,
-                            ui_lang=COALESCE(excluded.ui_lang, sessions.ui_lang)
+                            ui_lang=COALESCE(excluded.ui_lang, sessions.ui_lang),
+                            model_pinned=COALESCE(?, sessions.model_pinned)
                         """,
-                        (uid, model, json.dumps(history), provider or PROVIDER_DEFAULT, 1 if tools_enabled else 0, engine_mode or "native", safe_ui_lang),
+                        (uid, model, json.dumps(history), provider or PROVIDER_DEFAULT, 1 if tools_enabled else 0, engine_mode or "native", safe_ui_lang, pin, pin),
                     )
                     conn.commit()
             DB.withRetry(op, "save_session")
@@ -309,6 +328,67 @@ class DB:
         except Exception as e:
             log.error(f"DB get_healthy_models: {e}")
             return []
+    @staticmethod
+    def get_live_text_rows(max_age_sec=3600):
+        """Every text model the last probe reached, across providers.
+
+        The probe only writes rows for models a provider still lists, so an old
+        `last_check` means the model was delisted — it must not be offered or auto-picked.
+        """
+        try:
+            cutoff = int(time.time()) - int(max_age_sec)
+            with DB.connectDb() as conn:
+                rows = conn.execute(
+                    "SELECT provider, model_id, available, last_check, COALESCE(latency_ms, 0) "
+                    "FROM model_health WHERE category = 'text' AND last_check >= ?",
+                    (cutoff,)).fetchall()
+                return [{"provider": r[0], "model_id": r[1], "available": r[2] == 1,
+                         "last_check": r[3] or 0, "latency_ms": r[4] or 0} for r in rows]
+        except Exception as e:
+            log.error(f"DB get_live_text_rows: {e}")
+            return []
+
+    @staticmethod
+    def get_success_rates(window_sec=86400):
+        """{(provider, model): (answered, attempted)} over the window — 402/429/timeouts count as misses."""
+        try:
+            cutoff = int(time.time()) - int(window_sec)
+            with DB.connectDb() as conn:
+                rows = conn.execute(
+                    "SELECT provider, model, SUM(CASE WHEN error IS NULL OR error = '' THEN 1 ELSE 0 END), COUNT(*) "
+                    "FROM request_log WHERE ts >= ? GROUP BY provider, model",
+                    (cutoff,)).fetchall()
+                return {(r[0], r[1]): (r[2] or 0, r[3] or 0) for r in rows if r[0] and r[1]}
+        except Exception as e:
+            log.error(f"DB get_success_rates: {e}")
+            return {}
+
+    @staticmethod
+    def count_voice_uses(uid, kind, window_sec=3600):
+        """Timestamps of this person's transcriptions/voicings inside the window."""
+        try:
+            cutoff = int(time.time()) - int(window_sec)
+            with DB.connectDb() as conn:
+                rows = conn.execute(
+                    "SELECT ts FROM voice_usage WHERE uid = ? AND kind = ? AND ts >= ? ORDER BY ts",
+                    (uid, kind, cutoff)).fetchall()
+                return [r[0] for r in rows]
+        except Exception as e:
+            log.error(f"DB count_voice_uses: {e}")
+            return []
+
+    @staticmethod
+    def log_voice_use(uid, kind):
+        try:
+            def op():
+                with DB.connectDb() as conn:
+                    conn.execute("INSERT INTO voice_usage (ts, uid, kind) VALUES (?, ?, ?)",
+                                 (int(time.time()), uid, str(kind)[:16]))
+                    conn.commit()
+            DB.withRetry(op, "log_voice_use")
+        except Exception as e:
+            log.error(f"DB log_voice_use: {e}")
+
     @staticmethod
     def get_recent_models(provider, max_age_sec=600, category="text", limit=12):
         try:

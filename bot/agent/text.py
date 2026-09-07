@@ -7,6 +7,42 @@ ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 MDV2_ESCAPE_RE = re.compile(r"([_*\[\]()~`>#+\-=|{}.!\\])")
 MDV2_UNESCAPE_RE = re.compile(r"\\([_*\[\]()~`>#+\-=|{}.!\\])")
 
+REASONING_BLOCK_RE = re.compile(
+    r"<(think|thinking|reasoning)\b[^>]*>.*?</\1\s*>|\[(think|thinking|reasoning)\].*?\[/\2\]",
+    re.DOTALL | re.IGNORECASE,
+)
+REASONING_OPENER_RE = re.compile(
+    r"\A\s*(?:<(?:think|thinking|reasoning)\b[^>]*>|\[(?:think|thinking|reasoning)\])\s*",
+    re.IGNORECASE,
+)
+
+
+def strip_reasoning(text: str | None) -> str:
+    """Drop a model's scratchpad from what the user reads.
+
+    Two shapes reach us: a closed `<think>…</think>` / `[thinking]…[/thinking]` block
+    anywhere in the text, and an unclosed marker at the very start — minimax on
+    OpenRouter opened with `[thinking] The user is asking in Russian…` and never closed
+    it, so the whole train of thought arrived as the answer. An unclosed opener is cut
+    to the end of its line, which is where the answer began in every sample we have.
+    """
+    value = REASONING_BLOCK_RE.sub("", text or "")
+    opener = REASONING_OPENER_RE.match(value)
+    if opener:
+        rest = value[opener.end():]
+        newline = rest.find("\n")
+        value = "" if newline == -1 else rest[newline + 1:]
+    return value.strip()
+
+
+def answer_from_message(message: dict[str, Any] | None) -> str:
+    """The reply text of a chat-completion message, scratchpad removed.
+
+    `reasoning` and `reasoning_content` are deliberately ignored: OpenRouter returns the
+    chain of thought in its own field, and nothing user-facing may ever read it.
+    """
+    return strip_reasoning((message or {}).get("content") or "")
+
 
 def estimate_tokens(messages: list[dict[str, Any]]) -> int:
     text = "".join([m.get("content", "") or "" for m in messages])

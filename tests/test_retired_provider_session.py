@@ -38,7 +38,8 @@ CREATE TABLE sessions (
     engine_mode TEXT,
     last_session_id TEXT,
     profile TEXT,
-    ui_lang TEXT
+    ui_lang TEXT,
+    model_pinned INTEGER NOT NULL DEFAULT 0
 )
 """
 
@@ -46,7 +47,7 @@ CREATE TABLE sessions (
 def seed_session(uid, provider, model):
     with sqlite3.connect(_TMP_DB) as conn:
         conn.execute(
-            "INSERT OR REPLACE INTO sessions VALUES (?, ?, '[]', ?, 1, 'native', '', 'beginner', 'ru')",
+            "INSERT OR REPLACE INTO sessions VALUES (?, ?, '[]', ?, 1, 'native', '', 'beginner', 'ru', 1)",
             (uid, model, provider),
         )
 
