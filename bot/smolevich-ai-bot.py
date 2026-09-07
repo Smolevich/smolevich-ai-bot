@@ -1316,19 +1316,19 @@ def build_help_text(sess, is_admin=False):
     is_en = sess.get("ui_lang", "ru") == "en"
     if is_en:
         lines = [
-            "Hi. Send a message and I will answer with the selected text model.",
+            "Hi. Just write — I'll answer.",
             "",
-            "The buttons at the bottom cover voice modes and the model picker; ☰ More holds the rest.",
-            "Use /menu to bring the buttons back, /help to show this message.",
+            "🎙 Send a voice message or an audio file and I'll transcribe it.",
+            "Everything else is under ☰. /menu brings the buttons back.",
         ]
         if is_admin:
             lines.append("Admin tools are in /menu -> Admin.")
         return "\n".join(lines)
     lines = [
-        "Привет. Просто напиши сообщение — я отвечу выбранной текстовой моделью.",
+        "Привет. Просто напиши — отвечу.",
         "",
-        "Кнопки снизу — голосовые режимы и выбор модели; остальное под ☰ Ещё.",
-        "Через /menu кнопки возвращаются, через /help — эта подсказка.",
+        "🎙 Пришли голосовое или аудиофайл — расшифрую.",
+        "Остальное под ☰. Через /menu кнопки возвращаются.",
     ]
     if is_admin:
         lines.append("Админские инструменты находятся в /menu -> Admin.")
@@ -1503,11 +1503,11 @@ def handle_callback(cb, token, admin_id):
         DB.save_session(uid, model, sess["history"], provider=prov_name,
                         tools_enabled=PROVIDERS[prov_name].get("supports_tools", True),
                         engine_mode=sess.get("engine_mode", "native"), model_pinned=True)
-        short = model.split("/")[-1] if "/" in model else model
+        short = model_routing.human_model_name(model)
         tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"],
-                                                  "text": (f"Answering with {short}" if is_en else f"Отвечаю моделью {short}")})
-        tg_send_text(token, uid, (f"💬 Now answering with {short}. Ask anything."
-                                  if is_en else f"💬 Теперь отвечаю моделью {short}. Спрашивай."))
+                                                  "text": (f"Answering with {short}" if is_en else f"Теперь отвечает {short}")})
+        tg_send_text(token, uid, (f"💬 {short} answers now. Ask anything."
+                                  if is_en else f"💬 Теперь отвечает {short}. Спрашивай."))
     elif data.startswith("set_model:"):
         m = sanitize_model_id(data.split(":", 1)[1])
         sess = DB.get_session(uid)
@@ -1519,13 +1519,14 @@ def handle_callback(cb, token, admin_id):
         if cat and cat not in ("text", "code"):
             tg_request(token, "answerCallbackQuery", {
                 "callback_query_id": cb["id"],
-                "text": f"Эта модель в категории {cat}. Выбор текстовых моделей доступен через /menu.",
+                "text": ("That one is not for chatting." if sess.get("ui_lang", "ru") == "en"
+                         else "Эта для разговора не годится — она умеет другое."),
                 "show_alert": True,
             })
             return
         DB.save_session(uid, m, sess["history"], provider=sess["provider"], tools_enabled=sess["tools_enabled"], engine_mode=sess.get("engine_mode", "native"), model_pinned=True)
         is_en = sess.get("ui_lang", "ru") == "en"
-        short = m.split("/")[-1] if "/" in m else m
+        short = model_routing.human_model_name(m)
         # Latency, category and "supports tools" are our plumbing; a person needs to know
         # who answers now and how to get back.
         txt = (f"💬 {short} is answering. Ask away." if is_en else f"💬 Отвечает {short}. Спрашивай.")
@@ -2293,6 +2294,8 @@ def process_update(upd, token, admin_id):
         if switched_to_text:
             provider = fixed_provider
             model = fixed_model
+            sess["provider"] = provider
+            sess["model"] = model
             DB.save_session(
                 uid,
                 model,
@@ -2302,10 +2305,6 @@ def process_update(upd, token, admin_id):
                 engine_mode=sess.get("engine_mode", "native"),
                 ui_lang=sess.get("ui_lang", "ru"),
             )
-            if sess.get("ui_lang", "ru") == "en":
-                tg_send_text(token, uid, "ℹ️ Switched from media model to chat model for text request.")
-            else:
-                tg_send_text(token, uid, "ℹ️ Для текстового запроса переключил модель с видео на чатовую.")
         prov = PROVIDERS.get(provider, PROVIDERS[PROVIDER_DEFAULT])
         api_key = load_provider_key(provider) or load_provider_key(PROVIDER_DEFAULT)
         use_proxy = prov.get("proxy", False)

@@ -32,6 +32,11 @@ The bot and the benchmark share a flock at `/var/lock/acpx.lock` so only one acp
 
 Paths, env vars and the binary mapping: [docs/config.md](docs/config.md).
 
+## Menu
+
+Screens, wording rules and the traps that produced them: [docs/menu.md](docs/menu.md).
+Short version: the bot picks the model, the person just asks; no screen may show a model id, a provider name or a benchmark score; every submenu ends with the same «← Назад» row.
+
 ## Deploy
 
 - Auto: push to `main` touching `bot/**` runs `.github/workflows/deploy.yml` (Tailscale → SSH → migrate → restart).

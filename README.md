@@ -11,7 +11,8 @@ A Telegram bot that gives you one chat interface in front of several LLM provide
 - **Health checks** — text/code model checks run via `model-health-check` cron; audio checks (STT/TTS) run via separate `model-audio-check` cron; image/video discovery runs via separate `model-media-check` cron.
 - **Free-models benchmark** — `model-benchmark` runs twice daily (07:00 and 19:00 UTC), picks the three most stable text models per provider for native chat tasks and the top-1 model for a claude tool-use task, scores them automatically and publishes the leaderboard and methodology to the site.
 - **Stats** — `/top` and `/status` summarise usage, success rate and per-provider/per-model delivery counts.
-- **Subscription gate** — first-time users are asked to subscribe to a Telegram channel before they get access; admin can approve/deny manually.
+- **Open to everyone** — no gate, no allowlist. Text questions have no per-user ceiling (the free tiers and the provider breaker are the ceiling); transcription and voicing are capped at 10 per hour each, per person.
+- **The bot picks the model** — the answering model is the leader of the latest measurement among models the health probe can currently reach, and a failed call falls through to the next one silently. A model chosen by hand is kept and tried first.
 - **Multiple engine modes** — `/mode` toggles between native (direct OpenAI-compatible API call), Claude Code via ACP, opencode, and a "pi" experimental mode.
 - **Version command** — `/version` (and the bottom of `/status`) reports the deployed build, stamped by CI as `YYYY-MM-DD-<short_sha>`.
 
