@@ -1411,7 +1411,8 @@ def send_users_text(token, uid, admin_id):
 def send_tts_audio(token, uid, source_text):
     from agent.telegram_api import tg_send_chat_action
     sess = DB.get_session(uid)
-    if not allow_voice_use(uid, "tts", token, is_en=sess.get("ui_lang", "ru") == "en"):
+    is_en = sess.get("ui_lang", "ru") == "en"
+    if not allow_voice_use(uid, "tts", token, is_en=is_en):
         return
     tg_send_chat_action(token, uid, action="upload_document")
     try:
@@ -1442,7 +1443,9 @@ def send_tts_audio(token, uid, source_text):
             error=None if res.get("ok") else (res.get("description") or "telegram_send_failed"),
         )
         if not res.get("ok"):
-            tg_send_text(token, uid, f"❌ TTS send failed: {(res.get('description') or '')[:200]}")
+            # The reason is in media_request_log; the person only needs to know it failed.
+            tg_send_text(token, uid, "Не получилось озвучить. Попробуй ещё раз."
+                         if not is_en else "Voicing failed. Try again.")
     except Exception as e:
         DB.log_media_request(
             uid,
@@ -1455,7 +1458,9 @@ def send_tts_audio(token, uid, source_text):
             ok=False,
             error=str(e),
         )
-        tg_send_text(token, uid, f"❌ TTS error: {str(e)[:300]}")
+        log.error(f"send_tts_audio: {e}")
+        tg_send_text(token, uid, "Не получилось озвучить. Попробуй ещё раз."
+                     if not is_en else "Voicing failed. Try again.")
 
 def welcome_after_gate(uid, token, admin_id):
     """Passing the gate must open the bot, not end the conversation.
@@ -1488,7 +1493,7 @@ def handle_callback(cb, token, admin_id):
         default_model = DB.pick_default_text_model(prov_name) or PROVIDERS[prov_name]["default_model"]
         default_tools = PROVIDERS[prov_name].get("supports_tools", True)
         DB.save_session(uid, default_model, sess["history"], provider=prov_name, tools_enabled=default_tools, engine_mode=sess.get("engine_mode", "native"), model_pinned=True)
-        tg_request(token, "editMessageText", {"chat_id": cb["message"]["chat"]["id"], "message_id": cb["message"]["message_id"], "text": f"💬 Отвечает {default_model}. Спрашивай.", "reply_markup": {"inline_keyboard": [[{"text": "← Назад", "callback_data": "menu:back"}]]}})
+        tg_request(token, "editMessageText", {"chat_id": cb["message"]["chat"]["id"], "message_id": cb["message"]["message_id"], "text": f"💬 Теперь отвечает {model_routing.human_model_name(default_model)}. Спрашивай.", "reply_markup": {"inline_keyboard": [[{"text": "← Назад", "callback_data": "menu:back"}]]}})
     elif data.startswith("try:"):
         # Straight from a leaderboard row: switch provider and model together, stay on the list.
         _, code, model = data.split(":", 2)
