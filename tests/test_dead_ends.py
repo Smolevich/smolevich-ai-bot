@@ -55,14 +55,15 @@ class ModelList(unittest.TestCase):
         txt, kb = self.build()
         self.assertNotIn("812ms", " ".join(b["text"] for row in kb for b in row))
 
-    def test_shows_what_the_board_measured(self):
+    def test_no_benchmark_score_on_a_button(self):
+        """"решает 7 из 10" is a number for the admin board, not for a button."""
         board = {"models": [{"model": "meta/muse-glimmer-30b", "solved_of_ten": 7, "scores": {}}]}
         _, kb = self.build(board)
-        self.assertIn("решает 7 из 10", " ".join(b["text"] for row in kb for b in row))
+        self.assertNotIn("из 10", " ".join(b["text"] for row in kb for b in row))
 
     def test_there_is_always_a_way_back(self):
         _, kb = self.build()
-        self.assertIn("menu:back", [b["callback_data"] for row in kb for b in row])
+        self.assertTrue(kb[-1][0]["text"].startswith("←"), kb[-1])
 
     def test_heading_is_not_provider_slang(self):
         txt, _ = self.build()

@@ -41,13 +41,15 @@ class QuickKeyboard(unittest.TestCase):
         self.assertLessEqual(len(buttons(keyboard(SESSION_RU))), 4)
 
     def test_voice_buttons_hidden_when_unavailable(self):
-        # Chat, the board, and ☰ — voicing lives under ☰ so the cap of four always holds.
-        self.assertEqual(len(buttons(keyboard(SESSION_RU, stt=False, tts=False))), 3)
+        # Ask and ☰ — voicing lives under ☰ so the cap of four always holds.
+        self.assertEqual(len(buttons(keyboard(SESSION_RU, stt=False, tts=False))), 2)
 
-    def test_the_board_is_one_tap_away(self):
-        self.assertIn(bot.QUICK_BOARD["ru"], buttons(keyboard(SESSION_RU)))
+    def test_the_measurement_is_not_the_second_button_a_newcomer_sees(self):
+        """A table of models asking "which one?" is not what someone came here for."""
+        self.assertNotIn(bot.QUICK_BOARD["ru"], buttons(keyboard(SESSION_RU)))
 
-    def test_board_label_routes_to_the_board(self):
+    def test_the_retired_board_label_still_routes_somewhere(self):
+        """Reply keyboards live on in clients long after the layout changed."""
         self.assertEqual(bot.quick_action_for(bot.QUICK_BOARD["ru"]), "board")
         self.assertEqual(bot.quick_action_for(bot.QUICK_BOARD["en"]), "board")
 
@@ -69,10 +71,14 @@ class ChatIsAlwaysReachable(unittest.TestCase):
 
 
 class MenuRootText(unittest.TestCase):
-    def test_no_explanatory_blurb(self):
-        with mock.patch.object(bot, "has_video_detector", return_value=False):
-            txt, _ = bot.build_menu_root(SESSION_RU, is_admin=False)
-        self.assertEqual(txt, "☰ Ещё")
+    def test_the_menu_title_is_never_a_bottom_button_label(self):
+        """Regression: the root menu's text was literally "☰ Ещё", so the chat showed the
+        label twice — from the person and from the bot — and read as an echo of the tap."""
+        with mock.patch.object(bot, "has_video_detector", return_value=False), \
+             mock.patch.object(bot, "has_tts_models", return_value=False):
+            for sess in (SESSION_RU, SESSION_EN):
+                txt, _ = bot.build_menu_root(sess, is_admin=False)
+                self.assertEqual(bot.quick_action_for(txt), "", txt)
 
 
 class QuickLabelRouting(unittest.TestCase):

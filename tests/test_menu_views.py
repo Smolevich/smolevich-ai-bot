@@ -58,14 +58,20 @@ class MenuRoot(unittest.TestCase):
              mock.patch.object(bot, "has_video_detector", return_value=False):
             return bot.build_menu_root(SESSION, is_admin=is_admin)
 
-    def test_board_is_not_buried_in_a_submenu(self):
-        """It moved to the bottom keyboard: the product must open in one tap, not three."""
+    def test_the_measurement_lives_under_one_named_screen(self):
+        """Not on the bottom row, not in Settings — under ☰ → «Для любопытных»."""
         _, kb = self.build(is_admin=False)
+        self.assertIn("menu:curious", labels(kb))
         self.assertNotIn("menu:top", labels(kb))
         with mock.patch.object(bot, "has_stt_models", return_value=False), \
              mock.patch.object(bot, "has_tts_models", return_value=False):
             bottom = bot.build_quick_keyboard(SESSION)
-        self.assertIn(bot.QUICK_BOARD["ru"], [b["text"] for row in bottom["keyboard"] for b in row])
+        self.assertNotIn(bot.QUICK_BOARD["ru"], [b["text"] for row in bottom["keyboard"] for b in row])
+
+    def test_picking_a_model_is_not_on_the_first_screen(self):
+        """Choosing a model is for the curious; the default path is just asking."""
+        _, kb = self.build(is_admin=False)
+        self.assertNotIn("menu:model", labels(kb))
 
     def test_admin_menu_does_not_duplicate_the_board(self):
         self.assertNotIn("menu:top", labels(bot.build_admin_menu(SESSION)[1]))

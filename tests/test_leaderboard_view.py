@@ -1,7 +1,8 @@
-"""The button must show the published board — and order it by something a human can check.
+"""The measurement, split in two: names for people, numbers for the admin.
 
-Until 2026-08-12 the button showed delivery stats of the bot's own requests instead,
-and the published `rank` put a model solving 7/10 above one solving 9/10.
+Until 2026-09-07 the second screen a newcomer saw was ten rows of
+`minimax-m3:free · OpenRouter · решает 8 из 10` with "нажми номер — отвечу этой
+моделью". That screen asked the person to do the bot's job.
 
 Stdlib only, like the rest of the project.
 """
@@ -22,8 +23,10 @@ assert _spec and _spec.loader
 bot = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(bot)
 
+SESSION = {"provider": "groq", "model": "llama-3.1-8b-instant", "ui_lang": "ru"}
+
 PAYLOAD = {
-    "updatedAt": "2026-08-12T07:01:41.216Z",
+    "updatedAt": "2026-09-07T07:20:18.441Z",
     "models": [
         {"rank": 1, "model": "cohere/north-mini-code:free", "provider": "OpenRouter", "scores": {"native": 0.722}},
         {"rank": 2, "model": "meta/llama-3.2-11b", "provider": "NVIDIA", "scores": {"native": 0.66}},
@@ -31,65 +34,83 @@ PAYLOAD = {
     ],
 }
 
+RANKED = [("groq", "llama-3.1-8b-instant"),
+          ("openrouter", "cohere/north-mini-code:free"),
+          ("nvidia", "meta/llama-3.2-11b")]
 
-def view(payload, is_en=False):
+
+def curious(ranked=None):
+    with mock.patch.object(bot, "live_model_ranking", return_value=list(RANKED if ranked is None else ranked)):
+        return bot.build_curious_view(SESSION)
+
+
+def admin_text(payload=PAYLOAD):
     with mock.patch.object(bot, "fetch_leaderboard", return_value=payload):
-        return bot.build_leaderboard_view(is_en=is_en)
+        return bot.build_board_admin_text()
 
 
 def callbacks(kb):
     return [b["callback_data"] for row in kb for b in row]
 
 
-class Ordering(unittest.TestCase):
-    def test_best_solver_comes_first_despite_published_rank(self):
-        txt, _ = view(PAYLOAD)
-        self.assertLess(txt.index("llama-3.1-8b-instant"), txt.index("north-mini-code"))
+class TheCuriousScreen(unittest.TestCase):
+    def test_no_more_than_five_rows(self):
+        many = [("groq", f"m-{i}") for i in range(20)]
+        txt, _ = curious(many)
+        self.assertLessEqual(len([line for line in txt.splitlines() if line.startswith("• ")]),
+                             bot.CURIOUS_ROWS)
 
-    def test_unmeasured_model_sinks_below_measured_ones(self):
-        payload = {"models": [{"model": "a/unknown", "provider": "Groq", "scores": {}},
-                              {"model": "b/known", "provider": "Groq", "scores": {"native": 0.5}}]}
-        txt, _ = view(payload)
-        self.assertLess(txt.index("known"), txt.index("unknown"))
+    def test_the_steadiest_is_marked_and_only_once(self):
+        txt, _ = curious()
+        self.assertEqual(txt.count("✔ самая стабильная"), 1)
+        self.assertIn("Llama 3.1 8B Instant  ✔ самая стабильная", txt)
 
+    def test_no_benchmark_numbers_on_a_users_screen(self):
+        txt, _ = curious()
+        for jargon in ("из 10", "of 10", "Замерено", "Measured", "score"):
+            self.assertNotIn(jargon, txt)
 
-class Wording(unittest.TestCase):
-    def test_pass_rate_is_shown_as_whole_answers(self):
-        txt, _ = view(PAYLOAD)
-        self.assertIn("решает 9 из 10", txt)
+    def test_no_model_ids_and_no_provider_names_on_a_users_screen(self):
+        txt, _ = curious()
+        for jargon in (":free", "OpenRouter", "openrouter", "nvidia", "cohere/"):
+            self.assertNotIn(jargon, txt)
 
-    def test_no_developer_scores_leak_into_the_screen(self):
-        txt, _ = view(PAYLOAD)
-        for word in ("score", "overall", "native", "0.891", "uptime"):
-            self.assertNotIn(word, txt.lower())
+    def test_it_says_choosing_is_optional(self):
+        txt, _ = curious()
+        self.assertIn("Выбирать не обязательно", txt)
 
-    def test_unmeasured_model_says_so_instead_of_showing_zero(self):
-        payload = {"models": [{"model": "a/unknown", "provider": "Groq", "scores": {}}]}
-        txt, _ = view(payload)
-        self.assertIn("данных пока мало", txt)
-
-
-class TryButtons(unittest.TestCase):
-    def test_every_row_offers_to_try_that_model(self):
-        _, kb = view(PAYLOAD)
+    def test_every_name_offers_to_try_that_model(self):
+        _, kb = curious()
         self.assertEqual(len([c for c in callbacks(kb) if c.startswith("try:")]), 3)
 
     def test_callback_stays_within_telegram_64_byte_limit(self):
-        _, kb = view(PAYLOAD)
+        _, kb = curious()
         for data in callbacks(kb):
             self.assertLessEqual(len(data.encode()), 64, data)
 
     def test_callback_carries_the_provider_not_just_the_model(self):
-        _, kb = view(PAYLOAD)
+        _, kb = curious()
         groq = [c for c in callbacks(kb) if c.endswith("llama-3.1-8b-instant")][0]
         self.assertEqual(bot.PROVIDER_BY_CODE[groq.split(":")[1]], "groq")
 
+    def test_an_empty_ranking_does_not_dead_end(self):
+        txt, kb = curious([])
+        self.assertTrue(txt)
+        self.assertTrue(kb[-1][0]["text"].startswith("←"))
 
-class EmptyBoard(unittest.TestCase):
-    def test_missing_payload_does_not_crash_the_button(self):
-        txt, kb = view(None)
-        self.assertIn("Замеры", txt)
-        self.assertTrue(kb)
+
+class TheAdminBoard(unittest.TestCase):
+    def test_best_solver_comes_first_despite_published_rank(self):
+        txt = admin_text()
+        self.assertLess(txt.index("llama-3.1-8b-instant"), txt.index("north-mini-code"))
+
+    def test_the_numbers_survive_where_the_admin_can_see_them(self):
+        txt = admin_text()
+        self.assertIn("решает 9 из 10", txt)
+        self.assertIn("Замерено 2026-09-07", txt)
+
+    def test_an_empty_board_does_not_crash(self):
+        self.assertIn("Борд пуст", admin_text(None))
 
 
 if __name__ == "__main__":

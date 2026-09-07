@@ -261,21 +261,14 @@ def build_models_view(sess, category="text", limit=12):
         ms = DB.get_healthy_models(prov, category="text", limit=max(limit * 3, 30))
     ms = ms[:limit]
 
-    scored = {}
-    for entry in ((fetch_leaderboard() or {}).get("models") or []):
-        solved = solved_out_of_ten(entry)
-        if solved is not None:
-            scored[str(entry.get("model") or "")] = solved
-
+    # Scores belong to the admin board: "решает 7 из 10" on a button is a number nobody
+    # asked for and cannot act on. The name is enough to recognise what you picked.
     kb = []
     for m in ms:
         mid = m["id"]
-        label = mid.split("/")[-1] if "/" in mid else mid
-        solved = scored.get(mid)
-        if solved is not None:
-            label += (f" · solves {solved}/10" if is_en else f" · решает {solved} из 10")
-        kb.append([{"text": label[:60], "callback_data": f"set_model:{mid}"}])
-    kb.append([{"text": ("← Back" if is_en else "← Назад"), "callback_data": "menu:back"}])
+        kb.append([{"text": model_routing.human_model_name(mid)[:60], "callback_data": f"set_model:{mid}"}])
+    kb.append([{"text": ("🔌 Where answers come from" if is_en else "🔌 Откуда брать ответы"), "callback_data": "menu:provider"}])
+    kb.append([{"text": ("← Back" if is_en else "← Назад"), "callback_data": "menu:curious"}])
     return ("Who answers you" if is_en else "Кто будет отвечать"), kb
 
 
@@ -292,11 +285,12 @@ QUICK_MORE = {"ru": "☰ Ещё", "en": "☰ More"}
 def build_quick_keyboard(sess):
     """Bottom reply keyboard: four buttons at most, everything else lives under ☰.
 
-    The board is the product, so it opens in one tap; transcription moved under ☰ because
-    it is the secondary function and it was standing in front of the main one.
+    The measurement used to sit here as "🏆 Кто лучше" — the second thing a person saw
+    was a table asking them to pick a model. Asking is the bot's job now, so the board
+    moved down to ☰ → «Для любопытных» and the bottom row is: ask, transcribe, the rest.
     """
     lang = "en" if sess.get("ui_lang", "ru") == "en" else "ru"
-    kb = [[{"text": QUICK_CHAT[lang]}, {"text": QUICK_BOARD[lang]}]]
+    kb = [[{"text": QUICK_CHAT[lang]}]]
     # Four buttons is the cap, so only transcription gets a spot here; voicing lives under ☰.
     if has_stt_models():
         kb.append([{"text": QUICK_STT[lang]}])
@@ -318,32 +312,31 @@ def quick_action_for(text):
 
 
 def build_menu_root(sess, is_admin=False):
-    """Корневое inline-меню: то, что не влезло в четыре нижние кнопки."""
+    """Корневое inline-меню под ☰.
+
+    Its title used to be the literal "☰ Ещё" — the same string the bottom button sends,
+    so the chat showed the label twice, once from the person and once from the bot, and
+    read as if the bot were echoing the tap back.
+    """
     ui_lang = sess.get("ui_lang", "ru")
     is_en = ui_lang == "en"
-    kb = [[{"text": ("🤖 Model" if is_en else "🤖 Модель"), "callback_data": "menu:model"}]]
+    kb = []
     if has_tts_models():
         kb.append([{"text": ("🔊 Text → audio" if is_en else "🔊 Текст → аудио"), "callback_data": "menu:tts"}])
     if has_video_detector():
         kb.append([{"text": ("🕵️ Is the video AI-made?" if is_en else "🕵️ Видео: AI или нет"), "callback_data": "menu:video"}])
+    kb.append([{"text": ("🔬 For the curious" if is_en else "🔬 Для любопытных"), "callback_data": "menu:curious"}])
     kb.append([{"text": ("⚙️ Settings" if is_en else "⚙️ Настройки"), "callback_data": "menu:settings"}])
     if is_admin:
         kb.append([{"text": "🛠 Admin", "callback_data": "menu:admin"}])
-    return ("☰ More" if is_en else "☰ Ещё"), kb
+    return ("Everything else" if is_en else "Остальные возможности"), kb
 
 def build_menu_settings(sess, is_admin=False):
-    """Сабменю настроек."""
+    """Сабменю настроек. Модель и провайдер сюда не входят — они под «Для любопытных»."""
     is_en = sess.get("ui_lang", "ru") == "en"
-    model = sess.get("model", "")
-    prov = sess.get("provider", PROVIDER_DEFAULT)
-    model_short = model.split("/")[-1] if "/" in model else model
-    if len(model_short) > 30:
-        model_short = model_short[:27] + "…"
     ui_lang = sess.get("ui_lang", "ru")
     lang_label = "RU" if ui_lang == "ru" else "EN"
     kb = [
-        [{"text": (f"🤖 Model: {model_short}" if is_en else f"🤖 Модель: {model_short}"), "callback_data": "menu:model"}],
-        [{"text": (f"🔌 Provider: {prov}" if is_en else f"🔌 Провайдер: {prov}"), "callback_data": "menu:provider"}],
         [{"text": (f"🌐 Language: {lang_label}" if is_en else f"🌐 Язык: {lang_label}"), "callback_data": "menu:lang_toggle"}],
     ]
     kb += [
@@ -1472,12 +1465,10 @@ def welcome_after_gate(uid, token, admin_id):
     is_en = sess.get("ui_lang", "ru") == "en"
     tg_request(token, "sendMessage", {
         "chat_id": uid,
-        "text": ("You're in. Ask me anything, or see which free models do best."
-                 if is_en else "Готово. Спрашивай что угодно — или посмотри, какие бесплатные модели лучше справляются."),
+        "text": ("You're in. Ask me anything — I pick who answers."
+                 if is_en else "Готово. Спрашивай что угодно — кто отвечает, я выберу сам."),
         "reply_markup": build_quick_keyboard(sess),
     })
-    l_txt, l_kb = build_leaderboard_view(is_en=is_en)
-    tg_request(token, "sendMessage", {"chat_id": uid, "text": l_txt, "reply_markup": {"inline_keyboard": l_kb}})
 
 
 def handle_callback(cb, token, admin_id):
@@ -1618,6 +1609,10 @@ def handle_callback(cb, token, admin_id):
             m_txt, m_kb = build_menu_root(sess, is_admin=(uid == admin_id))
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": m_txt, "reply_markup": {"inline_keyboard": m_kb}})
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"]})
+        elif action == "curious":
+            c_txt, c_kb = build_curious_view(sess)
+            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": c_txt, "reply_markup": {"inline_keyboard": c_kb}})
+            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"]})
         elif action == "settings":
             s_txt, s_kb = build_menu_settings(sess, is_admin=(uid == admin_id))
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": s_txt, "reply_markup": {"inline_keyboard": s_kb}})
@@ -1679,7 +1674,10 @@ def handle_callback(cb, token, admin_id):
         elif action == "provider":
             avail = available_providers()
             kb = [[{"text": f"{'✅ ' if name == sess['provider'] else ''}{name}", "callback_data": f"set_provider:{name}"}] for name in avail]
-            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": "Provider:", "reply_markup": {"inline_keyboard": kb}})
+            # Every other screen ends with the same row; this one did not, and the only
+            # way out was to close the menu and start over.
+            kb.append([{"text": back_label, "callback_data": "menu:model"}])
+            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": ("Where answers come from" if is_en else "Откуда брать ответы"), "reply_markup": {"inline_keyboard": kb}})
         elif action == "reset":
             DB.save_session(uid, sess["model"], [], provider=sess["provider"], tools_enabled=sess["tools_enabled"], engine_mode=sess.get("engine_mode", "native"))
             DB.set_last_session_id(uid, "")
@@ -1695,14 +1693,16 @@ def handle_callback(cb, token, admin_id):
                 return
             send_status_text(token, uid)
             tg_send_text(token, uid, build_provider_health_text())
+            tg_send_text(token, uid, build_board_admin_text())
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Статус отправлен"})
         elif action == "help":
             tg_request(token, "sendMessage", {"chat_id": uid, "text": build_help_text(sess, is_admin=(uid == admin_id))})
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Помощь отправлена"})
         elif action == "top":
-            l_txt, l_kb = build_leaderboard_view(is_en=is_en)
-            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": l_txt, "reply_markup": {"inline_keyboard": l_kb}})
-            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Топ отправлен"})
+            # Old keyboards still carry this route; it lands on the screen that replaced it.
+            c_txt, c_kb = build_curious_view(sess)
+            tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": c_txt, "reply_markup": {"inline_keyboard": c_kb}})
+            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"]})
         elif action == "mode":
             if uid != admin_id:
                 tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Недоступно", "show_alert": True})
@@ -1747,9 +1747,16 @@ def take_pending_tts(uid):
     return False
 
 
-def handle_quick_action(action, uid, token, admin_id):
-    """Bottom-keyboard buttons arrive as plain text, not as callbacks."""
+def handle_quick_action(action, uid, token, admin_id, message_id=None):
+    """Bottom-keyboard buttons arrive as plain text, not as callbacks.
+
+    Telegram has no way to press a reply-keyboard button without sending its label, so
+    the tap is deleted the moment it is understood — otherwise "☰ Ещё" stands in the
+    chat as if the person had typed it.
+    """
     DB.log_ui_event(uid, "quick", action)
+    if message_id:
+        tg_request(token, "deleteMessage", {"chat_id": uid, "message_id": message_id})
     sess = DB.get_session(uid)
     is_en = sess.get("ui_lang", "ru") == "en"
     if action == "chat":
@@ -1773,19 +1780,17 @@ def handle_quick_action(action, uid, token, admin_id):
         with pendingTtsUsersLock:
             pendingTtsUsers.add(uid)
         tg_send_text(token, uid, "🔊 Send the text to voice." if is_en else "🔊 Пришли текст — верну аудио.")
-    elif action == "board":
-        l_txt, l_kb = build_leaderboard_view(is_en=is_en)
-        tg_request(token, "sendMessage", {"chat_id": uid, "text": l_txt, "reply_markup": {"inline_keyboard": l_kb}})
-    elif action == "model":
-        # Old keyboard: answer what they asked for, and replace the stale layout.
+    elif action in ("board", "model"):
+        # Both labels are gone from the layout but live on in clients that still show the
+        # old keyboard. Answer what they asked for, and replace the stale layout.
         tg_request(token, "sendMessage", {
             "chat_id": uid,
-            "text": ("Model lives under ☰ More now — buttons updated." if is_en
-                     else "Модель теперь под ☰ Ещё — обновил кнопки."),
+            "text": ("Updated the buttons — this now lives under ☰." if is_en
+                     else "Обновил кнопки — это теперь под ☰."),
             "reply_markup": build_quick_keyboard(sess),
         })
-        m_txt, m_kb = build_models_view(sess, category="text", limit=12)
-        tg_request(token, "sendMessage", {"chat_id": uid, "text": m_txt, "reply_markup": {"inline_keyboard": m_kb}})
+        c_txt, c_kb = build_curious_view(sess)
+        tg_request(token, "sendMessage", {"chat_id": uid, "text": c_txt, "reply_markup": {"inline_keyboard": c_kb}})
     elif action == "more":
         m_txt, m_kb = build_menu_root(sess, is_admin=(uid == admin_id))
         tg_request(token, "sendMessage", {"chat_id": uid, "text": m_txt, "reply_markup": {"inline_keyboard": m_kb}})
@@ -1870,50 +1875,57 @@ def solved_out_of_ten(entry):
         return None
 
 
-def build_leaderboard_view(is_en=False):
-    """Published board as plain sentences, each row offering to switch to that model."""
+CURIOUS_ROWS = 5
+
+
+def build_curious_view(sess):
+    """The measurement, for whoever wants to look. Nobody has to.
+
+    A ten-row table of `minimax-m3:free · OpenRouter · решает 8 из 10` was the second
+    screen an ordinary person saw, and it asked them to do the bot's job. What is left
+    here is five names, one badge on the steadiest, and a way back.
+    """
+    is_en = sess.get("ui_lang", "ru") == "en"
+    back = [{"text": ("← Back" if is_en else "← Назад"), "callback_data": "menu:back"}]
+    manual = [{"text": ("🤖 Choose by hand" if is_en else "🤖 Выбрать вручную"), "callback_data": "menu:model"}]
+    ranked = live_model_ranking()[:CURIOUS_ROWS]
+    if not ranked:
+        txt = ("Still measuring — everything answers as usual meanwhile."
+               if is_en else "Ещё измеряю — на вопросы это никак не влияет.")
+        return txt, [manual, back]
+
+    lines = ["Who answers best right now" if is_en else "Кто сейчас отвечает лучше всех"]
+    kb = []
+    for i, (provider, model) in enumerate(ranked):
+        name = model_routing.human_model_name(model)
+        badge = ("  ✔ the steadiest" if is_en else "  ✔ самая стабильная") if i == 0 else ""
+        lines.append(f"• {name}{badge}")
+        code = PROVIDER_CODES.get(provider)
+        if code:
+            kb.append([{"text": name[:60], "callback_data": f"try:{code}:{model}"}])
+    lines.append("\nYou don't have to choose — I use the top one." if is_en
+                 else "\nВыбирать не обязательно — сам беру верхнюю.")
+    kb.append(manual)
+    kb.append(back)
+    return "\n".join(lines), kb
+
+
+def build_board_admin_text():
+    """The raw measurement, with the numbers the user screen no longer shows."""
     payload = fetch_leaderboard()
     entries = (payload or {}).get("models") or []
     if not entries:
-        txt = ("Measurements are still running — check back tomorrow."
-               if is_en else "Замеры ещё идут — загляни завтра.")
-        return txt, [[{"text": ("← Back" if is_en else "← Назад"), "callback_data": "menu:back"}]]
-
-    # The published `rank` comes from a combined score that ranks a 72%-model above an 89% one.
-    # Until the publisher is fixed, order by the only number a human can check: answers solved.
+        return "Борд пуст — замеры ещё идут."
     entries = sorted(entries, key=lambda e: (solved_out_of_ten(e) is None, -(solved_out_of_ten(e) or 0)))
-
-    lines = ["🏆 Free models — how they do" if is_en else "🏆 Бесплатные модели — как справляются"]
-    kb = []
-    row = []
+    lines = ["🏆 Борд (замер)"]
     for i, e in enumerate(entries, start=1):
-        model = e.get("model") or ""
-        provider = (e.get("provider") or "").strip()
         solved = solved_out_of_ten(e)
-        short = model.split("/")[-1] if "/" in model else model
-        if solved is None:
-            verdict = "not enough data yet" if is_en else "данных пока мало"
-        else:
-            verdict = (f"solves {solved} of 10" if is_en else f"решает {solved} из 10")
-        lines.append(f"{i}. {short} · {provider}\n   {verdict}")
-        code = PROVIDER_CODES.get(provider.lower())
-        if code and model:
-            # Numbered buttons, three per row: ten full-width "Try <model>" rows filled the
-            # whole screen and pushed the list itself out of view.
-            row.append({"text": f"{i}", "callback_data": f"try:{code}:{model}"})
-            if len(row) == 3:
-                kb.append(row)
-                row = []
-    if row:
-        kb.append(row)
+        verdict = "данных мало" if solved is None else f"решает {solved} из 10"
+        lines.append(f"{i}. {e.get('model') or ''} · {(e.get('provider') or '').strip()} — {verdict}")
     updated = (payload or {}).get("updatedAt") or ""
     if updated[:10]:
-        lines.append(("\nMeasured " if is_en else "\nЗамерено ") + updated[:10])
-    if kb:
-        lines.append("\nTap a number to chat with that model." if is_en
-                     else "\nНажми номер — отвечу этой моделью.")
-    kb.append([{"text": ("← Back" if is_en else "← Назад"), "callback_data": "menu:back"}])
-    return "\n".join(lines), kb
+        lines.append(f"\nЗамерено {updated[:10]}")
+    return "\n".join(lines)
 
 
 def build_provider_health_text():
@@ -2272,7 +2284,7 @@ def process_update(upd, token, admin_id):
 
         quick = quick_action_for(text)
         if quick:
-            return handle_quick_action(quick, uid, token, admin_id)
+            return handle_quick_action(quick, uid, token, admin_id, message_id=msg.get("message_id"))
 
         if take_pending_tts(uid):
             send_tts_audio(token, uid, text)
