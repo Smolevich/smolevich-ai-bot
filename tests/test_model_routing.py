@@ -10,7 +10,6 @@ Stdlib only, like the rest of the project.
 from __future__ import annotations
 
 import sys
-import time
 import unittest
 from pathlib import Path
 
@@ -136,6 +135,14 @@ class WordsForPeople(unittest.TestCase):
     def test_model_ids_are_turned_into_names_people_can_read(self):
         self.assertEqual(mr.human_model_name("minimax/minimax-m3:free"), "MiniMax M3")
         self.assertEqual(mr.human_model_name("meta/llama-3.1-70b-instruct"), "Llama 3.1 70B Instruct")
+
+    def test_a_brand_glued_to_its_version_is_still_read_as_a_brand(self):
+        self.assertEqual(mr.human_model_name("qwen/qwen3.8-27b"), "Qwen 3.8 27B")
+        self.assertEqual(mr.human_model_name("openai/gpt-oss-20b"), "GPT OSS 20B")
+
+    def test_a_short_letter_and_digit_pair_is_not_split(self):
+        """"m3" must not come out as "M 3"."""
+        self.assertEqual(mr.human_model_name("minimax-m3"), "MiniMax M3")
 
 
 if __name__ == "__main__":

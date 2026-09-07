@@ -37,6 +37,8 @@ BRAND_NAMES = {
     "gpt": "GPT",
 }
 
+ACRONYMS = frozenset({"oss", "ai", "hd", "moe", "vl", "fp8", "it", "sft", "rl"})
+
 # Dots stay: they are version numbers ("llama-3.1-70b"), not word separators.
 _NAME_SPLIT_RE = re.compile(r"[-_]")
 
@@ -164,22 +166,37 @@ def is_retryable(status: int | None) -> bool:
     return status in RETRYABLE_STATUSES or status in (404, 410, 401, 402, 403)
 
 
+def _word(part: str) -> str:
+    known = BRAND_NAMES.get(part.lower())
+    if known:
+        return known
+    # "qwen3.8" is a brand glued to a version; only split on a brand of real length, or
+    # "m3" would come out as "M 3".
+    head = _leading_alpha(part)
+    if len(head) >= 3 and head.lower() in BRAND_NAMES:
+        tail = part[len(head):]
+        return f"{BRAND_NAMES[head.lower()]} {tail}".strip()
+    if part.lower() in ACRONYMS:
+        return part.upper()
+    if any(ch.isdigit() for ch in part):
+        return part.upper() if len(part) <= 4 else part
+    return part.capitalize()
+
+
+def _leading_alpha(part: str) -> str:
+    out = []
+    for ch in part:
+        if not ch.isalpha():
+            break
+        out.append(ch)
+    return "".join(out)
+
+
 def human_model_name(model_id: str) -> str:
     """`minimax/minimax-m3:free` → `MiniMax M3`. Nobody outside this repo speaks model ids."""
-    name = (model_id or "").split("/")[-1]
-    name = name.split(":")[0]
-    words: list[str] = []
-    for part in _NAME_SPLIT_RE.split(name):
-        if not part:
-            continue
-        known = BRAND_NAMES.get(part.lower())
-        if known:
-            words.append(known)
-        elif part.isdigit() or any(ch.isdigit() for ch in part):
-            words.append(part.upper() if len(part) <= 4 else part)
-        else:
-            words.append(part.capitalize())
-    return " ".join(words) or (model_id or "")
+    name = (model_id or "").split("/")[-1].split(":")[0]
+    words = [_word(part) for part in _NAME_SPLIT_RE.split(name) if part]
+    return " ".join(w for w in words if w) or (model_id or "")
 
 
 def all_failed_message(is_en: bool = False, retry_after_sec: float | None = None) -> str:
