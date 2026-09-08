@@ -1495,6 +1495,18 @@ def ask_via_acpx(uid, text, sess, sys_prompt="", target=None):
         log.error(f"acpx exception: {e}")
         return acpx_failure(uid, "acpx_exception", str(e)[:200], locals().get("session_uuid", ""))
 
+def send_model_answer(token, uid, text, reply_markup=None):
+    """Every word a model produced leaves through here, and nowhere else.
+
+    The three defences against a leaked scratchpad (`reasoning: exclude` in the request,
+    ignoring the provider's reasoning fields, cutting `[thinking]` out of the text) were
+    wired into the native branch only, so the sandbox answered the admin with
+    "[thinking] The user greeted me in Russian…" in front of the actual greeting.
+    """
+    clean = strip_reasoning(text)
+    parsed, ents = parse_markdown_to_entities(normalize_list_markers(clean))
+    return tg_send_long_text(token, uid, parsed, entities=ents, reply_markup=reply_markup)
+
 
 def build_system_prompt(is_admin=False):
     """The sandbox has no network for plain users, so only an admin may be told about the web."""
@@ -2371,7 +2383,7 @@ def process_update(upd, token, admin_id):
                 caption_text = str((msg.get("caption") or "")).strip()
                 lang = sess_for_media.get("ui_lang", "ru")
                 if analysis:
-                    tg_send_long_text(token, uid, format_video_analysis(analysis, lang=lang, caption_text=caption_text))
+                    send_model_answer(token, uid, format_video_analysis(analysis, lang=lang, caption_text=caption_text))
                 else:
                     tg_send_text(token, uid, "Не получилось разобрать это видео. Попробуй другое."
                                  if lang != "en" else "Could not read this video. Try another one.")
@@ -2639,8 +2651,7 @@ def process_update(upd, token, admin_id):
         if estimate_tokens(hist) > MAX_CONTEXT_TOKENS * 0.5:
             kb = {"inline_keyboard": [[{"text": "🔄 Reset Context", "callback_data": "reset_context"}]]}
             
-        txt_parsed, ents = parse_markdown_to_entities(normalize_list_markers(raw_reply))
-        send_res = tg_send_long_text(token, uid, txt_parsed, entities=ents, reply_markup=kb)
+        send_res = send_model_answer(token, uid, raw_reply, reply_markup=kb)
         DB.set_request_delivered(req_id, bool(send_res.get("ok")))
         queued = None
         with pendingTextByUserLock:
