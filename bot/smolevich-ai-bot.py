@@ -783,6 +783,22 @@ def retry_after_seconds(headers):
     return max(0.0, value)
 
 
+def media_too_big_or_wrong_format(reason, got="", limit="", is_en=False):
+    """Что прислать и какой предел — всё, что человеку тут нужно.
+
+    Двадцать мегабайт — не наш выбор: столько Telegram отдаёт боту по file_id.
+    Название этого ограничения человеку ни о чём не говорит, поэтому названо число.
+    """
+    if reason == "video_format":
+        return ("I can't check GIFs. Send a video file — MP4 or WebM."
+                if is_en else "Гифки проверить не могу. Пришли видео файлом — MP4 или WebM.")
+    if reason == "audio_size":
+        return (f"The file is too big ({got}). I can take up to {limit} — send a shorter one."
+                if is_en else f"Файл великоват ({got}). Приму до {limit} — пришли покороче.")
+    return (f"The file is too big ({got}). I can take up to {limit} — send a shorter or compressed one."
+            if is_en else f"Файл великоват ({got}). Приму до {limit} — пришли покороче или сожми.")
+
+
 def should_show_debug_footer(uid, admin_id):
     """Подвал с sid, токенами и контекстом — админский, а не «у кого включено»."""
     if uid != admin_id:
@@ -1515,7 +1531,7 @@ def send_tts_audio(token, uid, source_text):
                 used_provider = "groq"
         audio, used_provider, used_model = tts_with_fallback(used_provider, source_text, tts_model)
         latency_ms = int((time.time() - t0) * 1000)
-        res = tg_send_document_bytes(token, uid, "tts.wav", audio, caption="🔊 TTS")
+        res = tg_send_document_bytes(token, uid, "tts.wav", audio, caption=("🔊 Voiced" if is_en else "🔊 Озвучка"))
         DB.log_media_request(
             uid,
             used_provider,
@@ -2151,7 +2167,8 @@ def process_update(upd, token, admin_id):
                 mime_type = str((media or {}).get("mime_type", "")).lower()
                 file_name = str((media or {}).get("file_name", "")).lower()
                 if mime_type == "image/gif" or file_name.endswith(".gif"):
-                    tg_send_text(token, uid, "❌ GIF is not supported for video detection by current provider endpoint. Send MP4/WebM video file.")
+                    is_en = sess_for_media.get("ui_lang", "ru") == "en"
+                    tg_send_text(token, uid, media_too_big_or_wrong_format("video_format", is_en=is_en))
                     return
                 media_size = int(media.get("file_size") or 0)
                 if media_size > TELEGRAM_BOT_FILE_DOWNLOAD_LIMIT_BYTES:
@@ -2168,7 +2185,9 @@ def process_update(upd, token, admin_id):
                         ok=False,
                         error=f"file_too_big:{media_size}",
                     )
-                    tg_send_text(token, uid, f"❌ Video is too big for Telegram Bot API download ({got} > {limit}). Send a smaller/compressed file.")
+                    tg_send_text(token, uid, media_too_big_or_wrong_format(
+                        "video_size", got=got, limit=limit,
+                        is_en=sess_for_media.get("ui_lang", "ru") == "en"))
                     return
                 file_id = media.get("file_id")
                 from agent.telegram_api import tg_send_chat_action
@@ -2204,7 +2223,8 @@ def process_update(upd, token, admin_id):
                 if analysis:
                     tg_send_long_text(token, uid, format_video_analysis(analysis, lang=lang, caption_text=caption_text))
                 else:
-                    tg_send_text(token, uid, "⚠️ Empty video analysis result.")
+                    tg_send_text(token, uid, "Не получилось разобрать это видео. Попробуй другое."
+                                 if lang != "en" else "Could not read this video. Try another one.")
             except Exception as e:
                 DB.log_media_request(
                     uid,
@@ -2217,7 +2237,8 @@ def process_update(upd, token, admin_id):
                     ok=False,
                     error=str(e),
                 )
-                tg_send_text(token, uid, f"❌ Video analysis error: {str(e)[:300]}")
+                tg_send_text(token, uid, "Не получилось проверить видео. Попробуй ещё раз."
+                             if sess_for_media.get("ui_lang", "ru") != "en" else "Video check failed. Try again.")
             finally:
                 with pendingVideoUsersLock:
                     pendingVideoUsers.discard(uid)
@@ -2243,7 +2264,9 @@ def process_update(upd, token, admin_id):
                         ok=False,
                         error=f"file_too_big:{media_size}",
                     )
-                    tg_send_text(token, uid, f"❌ Audio is too big for Telegram Bot API download ({got} > {limit}). Send a shorter/compressed file.")
+                    tg_send_text(token, uid, media_too_big_or_wrong_format(
+                        "audio_size", got=got, limit=limit,
+                        is_en=sess_for_media.get("ui_lang", "ru") == "en"))
                     return
                 file_id = media.get("file_id")
                 from agent.telegram_api import tg_send_chat_action
@@ -2282,9 +2305,11 @@ def process_update(upd, token, admin_id):
                     error=None if transcript else "empty_transcription",
                 )
                 if transcript:
-                    tg_send_long_text(token, uid, f"📝 Transcription:\n{transcript}")
+                    is_en = sess_for_media.get("ui_lang", "ru") == "en"
+                    tg_send_long_text(token, uid, ("📝 Transcript:\n" if is_en else "📝 Расшифровка:\n") + transcript)
                 else:
-                    tg_send_text(token, uid, "⚠️ No transcription text returned.")
+                    tg_send_text(token, uid, "Слов в записи не разобрал. Попробуй записать ещё раз."
+                                 if sess_for_media.get("ui_lang", "ru") != "en" else "No words came out of this recording. Try again.")
             except Exception as e:
                 DB.log_media_request(
                     uid,
@@ -2297,7 +2322,8 @@ def process_update(upd, token, admin_id):
                     ok=False,
                     error=str(e),
                 )
-                tg_send_text(token, uid, f"❌ STT error: {str(e)[:300]}")
+                tg_send_text(token, uid, "Не получилось расшифровать. Попробуй ещё раз."
+                             if sess_for_media.get("ui_lang", "ru") != "en" else "Transcription failed. Try again.")
             finally:
                 with pendingSttUsersLock:
                     pendingSttUsers.discard(uid)
@@ -2367,7 +2393,7 @@ def process_update(upd, token, admin_id):
                         "chat_id": msg.get("chat", {}).get("id", uid),
                     }
                 if now_ts - last_notice_ts >= INFLIGHT_BUSY_NOTICE_COOLDOWN_SEC:
-                    tg_send_text(token, uid, "⏳ Previous request is still running. I saved your latest message and will process it next.")
+                    tg_send_text(token, uid, "⏳ Ещё отвечаю на прошлое сообщение. Это сохранил — отвечу следом.")
                     inflightBusyNoticeTs[uid] = now_ts
                 return
             inflightUsers.add(uid)
