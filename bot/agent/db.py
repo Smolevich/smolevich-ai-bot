@@ -404,6 +404,24 @@ class DB:
             log.error(f"DB get_recent_models: {e}")
             return []
     @staticmethod
+    def mark_tools_unsupported(provider, model_id):
+        """Take the tool schema away from a model that types its calls out as text.
+
+        The provider's own model list said this one supports tools; what it actually does
+        is answer `<tool_call>curl …</tool_call>` in prose. The health probe may set the
+        flag back if it ever measures otherwise — a measurement outranks this heuristic.
+        """
+        try:
+            with DB.connectDb() as conn:
+                conn.execute(
+                    "UPDATE model_health SET supports_tools = 0, "
+                    "capabilities = REPLACE(REPLACE(COALESCE(capabilities, ''), 'tools,', ''), 'tools', '') "
+                    "WHERE provider = ? AND model_id = ?",
+                    (provider, model_id))
+        except Exception as e:
+            log.error(f"DB mark_tools_unsupported: {e}")
+
+    @staticmethod
     def get_model_info(provider, model_id):
         try:
             with DB.connectDb() as conn:

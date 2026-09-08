@@ -40,7 +40,7 @@ from agent.text import (
     strip_reasoning,
     unavailable_message,
 )
-from agent import model_routing, quota
+from agent import model_routing, quota, tool_calls
 from agent.entities import normalize_list_markers, parse_markdown_to_entities
 from agent.provider_api import available_providers, load_provider_key, make_opener
 from agent.telegram_api import tg_get_file_bytes, tg_request, tg_send_document_bytes, tg_send_long_text, tg_send_text, multipart_body
@@ -129,6 +129,17 @@ TOOLS = [
     {"type": "function", "function": {"name": "get_exchange_rate", "description": "Get rate", "parameters": {"type": "object", "properties": {"from_currency": {"type": "string"}, "to_currency": {"type": "string"}, "amount": {"type": "number", "default": 1}}, "required": ["from_currency", "to_currency"]}}}
 ]
 TOOL_HANDLERS = {"get_weather": lambda a: tool_get_weather(a["city"]), "get_exchange_rate": lambda a: tool_get_exchange_rate(a["from_currency"], a["to_currency"], a.get("amount", 1))}
+
+
+def provider_of(api_url):
+    """Which provider an endpoint belongs to. ask_llm is handed a URL, not a name."""
+    for name, cfg in PROVIDERS.items():
+        if cfg.get("url") and cfg["url"] == api_url:
+            return name
+    for name, cfg in PROVIDERS.items():
+        if cfg.get("url") and (api_url or "").startswith(cfg["url"].rsplit("/chat/completions", 1)[0]):
+            return name
+    return PROVIDER_DEFAULT
 
 
 def tools_for(is_admin):
@@ -911,6 +922,26 @@ def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tool
                 if not msg.get("tool_calls"):
                     content = answer_from_message(msg)
                     log.info(f"ask_llm response: finish={finish} content_len={len(content)} tool_calls=0")
+                    spans = tool_calls.find_pseudo_calls(content)
+                    if spans:
+                        # A model that types its calls out will keep doing it: take the schema
+                        # away from it for good, whatever the provider's own list claims.
+                        DB.mark_tools_unsupported(provider_of(api_url), model)
+                        command = tool_calls.command_from_pseudo_call(spans[0][2])
+                        if retry_use_tools and command and attempt < 8:
+                            log.info(f"pseudo tool call from {model}, running it: {command[:120]}")
+                            result = tool_run_in_container(command, uid=uid, allow_network=(uid == admin_id))
+                            messages.append({"role": "assistant", "content": content})
+                            messages.append({"role": "user", "content":
+                                             f"Result of that command:\n{result}\n\nAnswer the question from it."})
+                            continue
+                        content = tool_calls.strip_pseudo_calls(content)
+                        if not content:
+                            # Nothing but the make-believe call. That is a failed attempt, and the
+                            # next model in the ranking gets the question.
+                            log.warning(f"{model} answered with a textual tool call and nothing else")
+                            meta["error"] = "pseudo_tool_call"
+                            return None, usage, meta
                     if content:
                         # If the model was cut off by max_tokens, request continuation.
                         if finish == "length":
@@ -1078,12 +1109,12 @@ def answer_with_fallback(uid, admin_id, sess, hist, prompt_text, sys_prompt):
         DB.log_request(uid, target[0], target[1], 0, 0, meta.get("finish_reason"), 0,
                        meta.get("error"), mode=mode, request_http_ms=0)
         log.warning(f"{mode} mode failed with {meta.get('error')}; answering natively instead")
-    ans, usage, meta, provider, model = native_answer(uid, admin_id, sess, hist, prompt_text, sys_prompt)
+    ans, usage, meta, provider, model = native_answer(uid, admin_id, sess, hist, prompt_text)
     meta["mode"] = "native"
     return ans, usage, meta, provider, model
 
 
-def native_answer(uid, admin_id, sess, hist, prompt_text, sys_prompt):
+def native_answer(uid, admin_id, sess, hist, prompt_text):
     """Ask the ranking in order until something answers.
 
     Returns (answer|None, usage, meta, provider, model). Every attempt — including the
@@ -1107,7 +1138,10 @@ def native_answer(uid, admin_id, sess, hist, prompt_text, sys_prompt):
         api_key = load_provider_key(provider) or load_provider_key(PROVIDER_DEFAULT)
         caps = capabilities_for_model(provider, model)
         use_tools = sess.get("tools_enabled", True) and prov.get("supports_tools", True) and ("tools" in caps)
-        messages = [{"role": "system", "content": sys_prompt}] + hist + [{"role": "user", "content": prompt_text}]
+        # Built per candidate, not once for the question: the chain mixes models that get a
+        # tool schema with models that do not, and the prompt has to describe this one.
+        candidate_prompt = build_system_prompt(is_admin=(uid == admin_id), has_tools=use_tools)
+        messages = [{"role": "system", "content": candidate_prompt}] + hist + [{"role": "user", "content": prompt_text}]
         ans, usage, meta = ask_llm(prov["url"], api_key, model, messages, uid=uid, admin_id=admin_id,
                                    use_tools=use_tools, use_proxy=prov.get("proxy", False))
         if ans:
@@ -1499,15 +1533,35 @@ def send_model_answer(token, uid, text, reply_markup=None):
     ignoring the provider's reasoning fields, cutting `[thinking]` out of the text) were
     wired into the native branch only, so the sandbox answered the admin with
     "[thinking] The user greeted me in Russian…" in front of the actual greeting.
+
+    Same door, same reason, for a tool call the model typed out instead of asking for:
+    `<tool_call>curl …</arg_value></tool_call>` is not an answer either.
     """
-    clean = strip_reasoning(text)
+    clean = tool_calls.strip_pseudo_calls(strip_reasoning(text))
     parsed, ents = parse_markdown_to_entities(normalize_list_markers(clean))
     return tg_send_long_text(token, uid, parsed, entities=ents, reply_markup=reply_markup)
 
 
-def build_system_prompt(is_admin=False):
-    """The sandbox has no network for plain users, so only an admin may be told about the web."""
-    if is_admin:
+def build_system_prompt(is_admin=False, has_tools=True):
+    """What this model can do on this call — not what some other model could do.
+
+    The prompt told every model it was an admin with full internet access and to reach
+    for curl, while the request carried no tool schema at all (a text model's
+    capabilities row never contains "tools"). Models did as they were told the only way
+    left to them: they typed the call out. One answered the admin with a bare
+    `<tool_call>curl …</arg_value></tool_call>`, another with a ```bash block and eight
+    invented headlines under «Результат выполнения:». Promise a shell only when there is
+    one.
+    """
+    if not has_tools:
+        access = (
+            "You have NO tools on this turn: no shell, no internet, no web search, no file access. "
+            "Never write a tool call, a function call or an XML/JSON call block, and never show a "
+            "command as if you had run it or invent its output. Asked to look something up online, "
+            "say plainly that you cannot go online and answer from your own knowledge, naming the "
+            "date your knowledge ends when it matters. "
+        )
+    elif is_admin:
         access = (
             "You are an ADMIN with full internet access. "
             "Environment: Alpine Linux. No 'requests' lib, use 'urllib.request', wget, curl. "
@@ -1519,12 +1573,16 @@ def build_system_prompt(is_admin=False):
             "no API calls. Never offer to look something up online — say you cannot and answer from your "
             "own knowledge. Environment: Alpine Linux, offline. "
         )
+    # "Just execute and show results" is an instruction to a model that can execute. Said
+    # to one that cannot, it is an instruction to make the results up.
+    doing = ("Answer directly and briefly. " if not has_tools else
+             "Be concise — show actual command output, no hypothetical examples, no tables with "
+             "status, no 'next steps' sections. Just execute and show results. ")
     return (
         f"Smolevich AI Bot. Instructions: {access}"
         "Output: Telegram Markdown V2 — use *bold*, _italic_, `inline code`, triple backticks for code "
         "blocks, [text](url) for links. Keep formatting simple and valid for Telegram markdown. "
-        "Be concise — show actual command output, no hypothetical examples, no tables with status, "
-        "no 'next steps' sections. Just execute and show results. When user sends coordinates "
+        f"{doing}When user sends coordinates "
         "[Геолокация: lat, lon], use them for location-based queries (search nearby places, weather, etc.). "
         "Always complete your answer fully — never cut off mid-sentence."
     )
