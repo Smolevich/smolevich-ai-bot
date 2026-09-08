@@ -141,6 +141,27 @@ def rank_candidates(
     return [row[-1] for row in measured] + [row[-1] for row in spare]
 
 
+def badge_keys(
+    ranked: list[Candidate],
+    latency: dict[Candidate, int] | None = None,
+) -> dict[Candidate, str]:
+    """Пометки к именам — только те, что подтверждены замером.
+
+    Первое место в ранжировании и есть «самая стабильная»: список сортирован по
+    решённым задачам, затем по доле удачных ответов. «Быстрая» — наименьшая
+    задержка среди тех, кого проба успела засечь. Признака «длинные тексты» нет:
+    поле contextWindow опубликованного борда пусто у всех строк (08.09.2026).
+    """
+    if not ranked:
+        return {}
+    badges: dict[Candidate, str] = {ranked[0]: "steadiest"}
+    timed = [c for c in ranked if (latency or {}).get(c)]
+    if timed:
+        fastest = min(timed, key=lambda c: latency[c])
+        badges.setdefault(fastest, "fastest")
+    return badges
+
+
 def pick_default(ranked: list[Candidate]) -> Candidate | None:
     """The model a person who never chose one gets. Recomputed from the ranking every time."""
     return ranked[0] if ranked else None

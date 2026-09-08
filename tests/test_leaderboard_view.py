@@ -40,7 +40,8 @@ RANKED = [("groq", "llama-3.1-8b-instant"),
 
 
 def curious(ranked=None):
-    with mock.patch.object(bot, "live_model_ranking", return_value=list(RANKED if ranked is None else ranked)):
+    with mock.patch.object(bot, "live_model_ranking", return_value=list(RANKED if ranked is None else ranked)), \
+         mock.patch.object(bot, "live_latency_map", return_value={}):
         return bot.build_curious_view(SESSION)
 
 

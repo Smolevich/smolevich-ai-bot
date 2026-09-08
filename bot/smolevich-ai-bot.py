@@ -1039,6 +1039,11 @@ def live_model_ranking():
     return model_routing.rank_candidates(board, live, DB.get_success_rates(), latency)
 
 
+def live_latency_map():
+    """Задержка последней успешной пробы по каждой живой текстовой модели."""
+    return {(r["provider"], r["model_id"]): r.get("latency_ms", 0) for r in DB.get_live_text_rows()}
+
+
 def pick_leader():
     """The model an unpinned session answers with. Recomputed from the ranking every time."""
     return model_routing.pick_default(live_model_ranking())
@@ -1703,7 +1708,7 @@ def handle_callback(cb, token, admin_id):
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": m_txt, "reply_markup": {"inline_keyboard": m_kb}})
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"]})
         elif action == "curious":
-            c_txt, c_kb = build_curious_view(sess)
+            c_txt, c_kb = build_curious_view(sess, is_admin=(uid == admin_id))
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": c_txt, "reply_markup": {"inline_keyboard": c_kb}})
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"]})
         elif action == "settings":
@@ -1761,7 +1766,12 @@ def handle_callback(cb, token, admin_id):
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": ("Language: " if new_lang == "en" else "Язык: ") + ("EN" if new_lang == "en" else "RU")})
 
         elif action == "model":
-            m_txt, m_kb = build_models_view(sess, category="text", limit=12, is_admin=(uid == admin_id))
+            # Экран остался только у админа; у человека кнопка живёт в старых
+            # клавиатурах, и вести ей некуда, кроме той же пятёрки.
+            if uid == admin_id:
+                m_txt, m_kb = build_models_view(sess, category="text", limit=12, is_admin=True)
+            else:
+                m_txt, m_kb = build_curious_view(sess)
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": m_txt, "reply_markup": {"inline_keyboard": m_kb}})
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"]})
         elif action == "provider":
@@ -1796,7 +1806,7 @@ def handle_callback(cb, token, admin_id):
             say_toast(token, cb["id"], "help_sent", is_en)
         elif action == "top":
             # Old keyboards still carry this route; it lands on the screen that replaced it.
-            c_txt, c_kb = build_curious_view(sess)
+            c_txt, c_kb = build_curious_view(sess, is_admin=(uid == admin_id))
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": c_txt, "reply_markup": {"inline_keyboard": c_kb}})
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"]})
         elif action == "mode":
@@ -1885,7 +1895,7 @@ def handle_quick_action(action, uid, token, admin_id, message_id=None):
                      else "Обновил кнопки — это теперь под ☰."),
             "reply_markup": build_quick_keyboard(sess),
         })
-        c_txt, c_kb = build_curious_view(sess)
+        c_txt, c_kb = build_curious_view(sess, is_admin=(uid == admin_id))
         tg_request(token, "sendMessage", {"chat_id": uid, "text": c_txt, "reply_markup": {"inline_keyboard": c_kb}})
     elif action == "more":
         m_txt, m_kb = build_menu_root(sess, is_admin=(uid == admin_id))
@@ -1974,36 +1984,48 @@ def solved_out_of_ten(entry):
 CURIOUS_ROWS = 5
 
 
-def build_curious_view(sess):
+BADGE_LABELS = {
+    "steadiest": {"ru": "✔ самая стабильная", "en": "✔ the steadiest"},
+    "fastest": {"ru": "⚡ быстрая", "en": "⚡ the fastest"},
+}
+
+
+def build_curious_view(sess, is_admin=False):
     """The measurement, for whoever wants to look. Nobody has to.
 
     A ten-row table of `minimax-m3:free · OpenRouter · решает 8 из 10` was the second
     screen an ordinary person saw, and it asked them to do the bot's job. What is left
-    here is five names, one badge on the steadiest, and a way back.
+    here is five names with the badges the measurement supports, and a way back.
+
+    «🤖 Выбрать вручную» вело на вторую витрину тех же моделей — двенадцать имён без
+    порядка и без пометок. Для человека её больше нет: выбирать не из чего, если
+    пятёрка уже отсортирована. Админу список нужен и остаётся.
     """
     is_en = sess.get("ui_lang", "ru") == "en"
     back = [{"text": ("← Back" if is_en else "← Назад"), "callback_data": "menu:back"}]
     manual = [{"text": ("🤖 Choose by hand" if is_en else "🤖 Выбрать вручную"), "callback_data": "menu:model"}]
+    tail = ([manual, back] if is_admin else [back])
     ranked = live_model_ranking()[:CURIOUS_ROWS]
     if not ranked:
         txt = ("Still measuring — everything answers as usual meanwhile."
                if is_en else "Ещё измеряю — на вопросы это никак не влияет.")
-        return txt, [manual, back]
+        return txt, tail
 
+    badges = model_routing.badge_keys(ranked, live_latency_map())
     lines = ["Who answers best right now" if is_en else "Кто сейчас отвечает лучше всех"]
     kb = []
-    for i, (provider, model) in enumerate(ranked):
+    for candidate in ranked:
+        provider, model = candidate
         name = model_routing.human_model_name(model)
-        badge = ("  ✔ the steadiest" if is_en else "  ✔ самая стабильная") if i == 0 else ""
+        key = badges.get(candidate)
+        badge = f"  {BADGE_LABELS[key]['en' if is_en else 'ru']}" if key else ""
         lines.append(f"• {name}{badge}")
         code = PROVIDER_CODES.get(provider)
         if code:
             kb.append([{"text": name[:60], "callback_data": f"try:{code}:{model}"}])
     lines.append("\nYou don't have to choose — I use the top one." if is_en
                  else "\nВыбирать не обязательно — сам беру верхнюю.")
-    kb.append(manual)
-    kb.append(back)
-    return "\n".join(lines), kb
+    return "\n".join(lines), kb + tail
 
 
 def build_board_admin_text():
