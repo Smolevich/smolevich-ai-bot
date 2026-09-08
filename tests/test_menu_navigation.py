@@ -29,7 +29,10 @@ SESSION = {"provider": "groq", "model": "llama-3.3-70b-versatile", "ui_lang": "r
 
 
 def provider_screen_keyboard():
-    """The keyboard the `menu:provider` branch builds, taken from the request it sends."""
+    """The keyboard the `menu:provider` branch builds, taken from the request it sends.
+
+    Admin id on purpose: the screen exists only for the admin now.
+    """
     sent = []
     cb = {"id": "1", "from": {"id": 7}, "data": "menu:provider",
           "message": {"chat": {"id": 7}, "message_id": 42}}
@@ -37,7 +40,7 @@ def provider_screen_keyboard():
          mock.patch.object(bot.DB, "get_session", return_value=dict(SESSION)), \
          mock.patch.object(bot.DB, "log_ui_event"), \
          mock.patch.object(bot, "available_providers", return_value=["groq", "openrouter"]):
-        bot.handle_callback(cb, "token", admin_id=0)
+        bot.handle_callback(cb, "token", admin_id=7)
     for method, payload in sent:
         if method == "editMessageText":
             return payload["reply_markup"]["inline_keyboard"]

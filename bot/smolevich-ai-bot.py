@@ -246,7 +246,7 @@ def pick_video_detector():
 def has_video_detector():
     return bool(pick_video_detector()[1])
 
-def build_models_view(sess, category="text", limit=12):
+def build_models_view(sess, category="text", limit=12, is_admin=False):
     """Who can answer you, in the same words the leaderboard uses.
 
     The old screen showed `🟢🛠🎙 muse-glimmer-30b 812ms` — four unexplained icons, an
@@ -267,9 +267,21 @@ def build_models_view(sess, category="text", limit=12):
     for m in ms:
         mid = m["id"]
         kb.append([{"text": model_routing.human_model_name(mid)[:60], "callback_data": f"set_model:{mid}"}])
-    kb.append([{"text": ("🔌 Where answers come from" if is_en else "🔌 Откуда брать ответы"), "callback_data": "menu:provider"}])
+    # "Provider" is our plumbing, not a thing a person picks between; only the admin
+    # gets the door into it.
+    if is_admin:
+        kb.append([{"text": ("🔌 Where answers come from" if is_en else "🔌 Откуда брать ответы"), "callback_data": "menu:provider"}])
     kb.append([{"text": ("← Back" if is_en else "← Назад"), "callback_data": "menu:curious"}])
     return ("Who answers you" if is_en else "Кто будет отвечать"), kb
+
+
+# Ходят по API как `nvidia`, называются иначе. Экран провайдеров админский, но
+# идентификаторы на кнопках читать всё равно незачем.
+PROVIDER_DISPLAY_NAMES = {"openrouter": "OpenRouter", "groq": "Groq", "nvidia": "NVIDIA"}
+
+
+def provider_display_name(name):
+    return PROVIDER_DISPLAY_NAMES.get(name, (name or "").capitalize())
 
 
 QUICK_CHAT = {"ru": "💬 Спросить", "en": "💬 Ask"}
@@ -1485,6 +1497,11 @@ def handle_callback(cb, token, admin_id):
     route, _, arg = data.partition(":")
     DB.log_ui_event(uid, route, arg)
     if data.startswith("set_provider:"):
+        # The screen behind this button is admin-only; an old keyboard must not be a way
+        # around that, and must not answer a person in words they never saw.
+        if uid != admin_id:
+            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Недоступно", "show_alert": True})
+            return
         prov_name = data.split(":", 1)[1]; sess = DB.get_session(uid)
         # An old keyboard may still offer a provider we have since dropped.
         if prov_name not in PROVIDERS:
@@ -1660,12 +1677,15 @@ def handle_callback(cb, token, admin_id):
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": f"Language: {'EN' if new_lang == 'en' else 'RU'}"})
 
         elif action == "model":
-            m_txt, m_kb = build_models_view(sess, category="text", limit=12)
+            m_txt, m_kb = build_models_view(sess, category="text", limit=12, is_admin=(uid == admin_id))
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": m_txt, "reply_markup": {"inline_keyboard": m_kb}})
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"]})
         elif action == "provider":
+            if uid != admin_id:
+                tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Недоступно", "show_alert": True})
+                return
             avail = available_providers()
-            kb = [[{"text": f"{'✅ ' if name == sess['provider'] else ''}{name}", "callback_data": f"set_provider:{name}"}] for name in avail]
+            kb = [[{"text": f"{'✅ ' if name == sess['provider'] else ''}{provider_display_name(name)}", "callback_data": f"set_provider:{name}"}] for name in avail]
             # Every other screen ends with the same row; this one did not, and the only
             # way out was to close the menu and start over.
             kb.append([{"text": back_label, "callback_data": "menu:model"}])
