@@ -284,6 +284,37 @@ def provider_display_name(name):
     return PROVIDER_DISPLAY_NAMES.get(name, (name or "").capitalize())
 
 
+# Всплывашка от кнопки — такой же текст бота, как ответ в чат. До 09-07 половина
+# была на английском и про модели: `Model updated`, `Failed to update model`.
+# Админские ветки сюда не входят — им техника нужна.
+TOASTS = {
+    "done": {"ru": "Готово", "en": "Done"},
+    "already": {"ru": "Уже выбрано", "en": "Already chosen"},
+    "failed": {"ru": "Не получилось, попробуй ещё раз", "en": "Didn't work, try again"},
+    "unavailable": {"ru": "Недоступно", "en": "Unavailable"},
+    "not_for_chat": {"ru": "Эта для разговора не годится — она умеет другое",
+                     "en": "That one is not for chatting"},
+    "chat": {"ru": "Чат", "en": "Chat"},
+    "stt": {"ru": "Расшифровка", "en": "Transcription"},
+    "tts": {"ru": "Озвучка", "en": "Voicing"},
+    "video": {"ru": "Проверка видео", "en": "Video check"},
+    "reset": {"ru": "Сброшено", "en": "Reset"},
+    "help_sent": {"ru": "Помощь отправлена", "en": "Help sent"},
+}
+
+
+def toast(key, is_en=False):
+    """Текст всплывашки по ключу. Неизвестный ключ — пусто, а не английское имя ключа."""
+    return TOASTS.get(key, {}).get("en" if is_en else "ru", "")
+
+
+def say_toast(token, cb_id, key, is_en=False, alert=False):
+    payload = {"callback_query_id": cb_id, "text": toast(key, is_en)}
+    if alert:
+        payload["show_alert"] = True
+    return tg_request(token, "answerCallbackQuery", payload)
+
+
 QUICK_CHAT = {"ru": "💬 Спросить", "en": "💬 Ask"}
 # A reply keyboard stays on the client until it is replaced, so a button removed from the
 # layout keeps arriving as plain text — and went to the model as a question.
@@ -1500,7 +1531,7 @@ def handle_callback(cb, token, admin_id):
         # The screen behind this button is admin-only; an old keyboard must not be a way
         # around that, and must not answer a person in words they never saw.
         if uid != admin_id:
-            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Недоступно", "show_alert": True})
+            say_toast(token, cb["id"], "unavailable", alert=True)
             return
         prov_name = data.split(":", 1)[1]; sess = DB.get_session(uid)
         # An old keyboard may still offer a provider we have since dropped.
@@ -1518,7 +1549,7 @@ def handle_callback(cb, token, admin_id):
         sess = DB.get_session(uid)
         is_en = sess.get("ui_lang", "ru") == "en"
         if prov_name not in PROVIDERS:
-            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "❌", "show_alert": True})
+            say_toast(token, cb["id"], "unavailable", is_en, alert=True)
             return
         model = sanitize_model_id(model)
         # Chosen by hand: pin it, or the next question would silently go to the leader.
@@ -1539,12 +1570,7 @@ def handle_callback(cb, token, admin_id):
         # missing health-check rows shouldn't prevent picking a fresh model.
         cat = (info or {}).get("category") or ""
         if cat and cat not in ("text", "code"):
-            tg_request(token, "answerCallbackQuery", {
-                "callback_query_id": cb["id"],
-                "text": ("That one is not for chatting." if sess.get("ui_lang", "ru") == "en"
-                         else "Эта для разговора не годится — она умеет другое."),
-                "show_alert": True,
-            })
+            say_toast(token, cb["id"], "not_for_chat", sess.get("ui_lang", "ru") == "en", alert=True)
             return
         DB.save_session(uid, m, sess["history"], provider=sess["provider"], tools_enabled=sess["tools_enabled"], engine_mode=sess.get("engine_mode", "native"), model_pinned=True)
         is_en = sess.get("ui_lang", "ru") == "en"
@@ -1558,11 +1584,11 @@ def handle_callback(cb, token, admin_id):
         if not res.get("ok"):
             desc = (res.get("description") or "").lower()
             if "message is not modified" in desc:
-                tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Model already selected"})
+                say_toast(token, cb["id"], "already", is_en)
             else:
-                tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Failed to update model", "show_alert": True})
+                say_toast(token, cb["id"], "failed", is_en, alert=True)
         else:
-            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Model updated"})
+            say_toast(token, cb["id"], "done", is_en)
     elif data in ("check_sub", "request_access"):
         # Old gate messages still sit in people's chats. There is nothing to check now.
         DB.set_allowed(uid, True)
@@ -1570,7 +1596,7 @@ def handle_callback(cb, token, admin_id):
         welcome_after_gate(uid, token, admin_id)
     elif data.startswith("set_debug:"):
         if uid != admin_id:
-            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Недоступно", "show_alert": True})
+            say_toast(token, cb["id"], "unavailable", alert=True)
             return
         mode = data.split(":", 1)[1]
         with DEBUG_USERS_LOCK:
@@ -1579,7 +1605,7 @@ def handle_callback(cb, token, admin_id):
         tg_request(token, "editMessageText", {"chat_id": cb["message"]["chat"]["id"], "message_id": cb["message"]["message_id"], "text": f"✅ Debug footer: {mode.upper()}"})
     elif data.startswith("set_mode:"):
         if uid != admin_id:
-            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Недоступно", "show_alert": True})
+            say_toast(token, cb["id"], "unavailable", alert=True)
             return
         mode = data.split(":", 1)[1]
         sess = DB.get_session(uid)
@@ -1587,7 +1613,7 @@ def handle_callback(cb, token, admin_id):
         tg_request(token, "editMessageText", {"chat_id": cb["message"]["chat"]["id"], "message_id": cb["message"]["message_id"], "text": f"✅ Mode: {mode}"})
     elif data.startswith("set_tools:"):
         if uid != admin_id:
-            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Недоступно", "show_alert": True})
+            say_toast(token, cb["id"], "unavailable", alert=True)
             return
         mode = data.split(":", 1)[1]
         sess = DB.get_session(uid)
@@ -1606,7 +1632,7 @@ def handle_callback(cb, token, admin_id):
         u_dir = os.path.join(SESSIONS_ROOT, str(uid))
         if os.path.exists(u_dir): shutil.rmtree(u_dir); os.makedirs(u_dir)
         tg_request(token, "editMessageText", {"chat_id": cb["message"]["chat"]["id"], "message_id": cb["message"]["message_id"], "text": cb["message"].get("text", "") + "\n\n✅ Context reset done."})
-        tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Reset done."})
+        say_toast(token, cb["id"], "reset")
     elif data.startswith("menu:"):
         action = data.split(":", 1)[1]
         chat_id = cb["message"]["chat"]["id"]
@@ -1634,10 +1660,10 @@ def handle_callback(cb, token, admin_id):
             use_provider, use_model, switched = ensure_text_model_for_session(sess)
             DB.save_session(uid, use_model, sess["history"], provider=use_provider, tools_enabled=sess["tools_enabled"], engine_mode="native")
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": ("💬 Chat mode enabled.\nSend text and I'll reply." if is_en else "💬 Чат-режим включён.\nПиши обычный текст — я отвечу."), "reply_markup": {"inline_keyboard": [[{"text": back_label, "callback_data": "menu:back"}]]}})
-            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": ("Switched to text model" if switched and is_en else ("Переключил на текстовую модель" if switched else "Чат"))})
+            say_toast(token, cb["id"], "chat", is_en)
         elif action == "code":
             if uid != admin_id:
-                tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Недоступно", "show_alert": True})
+                say_toast(token, cb["id"], "unavailable", alert=True)
                 return
             use_provider, use_model, switched = ensure_text_model_for_session(sess)
             DB.save_session(uid, use_model, sess["history"], provider=use_provider, tools_enabled=sess["tools_enabled"], engine_mode="claude")
@@ -1650,7 +1676,7 @@ def handle_callback(cb, token, admin_id):
             with pendingSttUsersLock:
                 pendingSttUsers.add(uid)
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": ("🎙 Speech-to-text enabled.\nSend a voice/audio message." if is_en else "🎙 Речь в текст включена.\nПришли голосовое или аудиофайл."), "reply_markup": {"inline_keyboard": [[{"text": back_label, "callback_data": "menu:back"}]]}})
-            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "STT"})
+            say_toast(token, cb["id"], "stt", is_en)
         elif action == "tts":
             if not has_tts_models():
                 tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "TTS сейчас недоступен", "show_alert": True})
@@ -1658,7 +1684,7 @@ def handle_callback(cb, token, admin_id):
             with pendingTtsUsersLock:
                 pendingTtsUsers.add(uid)
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": ("🔊 Text-to-speech enabled.\nSend text and I will return audio." if is_en else "🔊 Текст в речь включён.\nПришли текст — верну аудио."), "reply_markup": {"inline_keyboard": [[{"text": back_label, "callback_data": "menu:back"}]]}})
-            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "TTS"})
+            say_toast(token, cb["id"], "tts", is_en)
         elif action == "video":
             _, video_model = pick_video_detector()
             if not video_model:
@@ -1667,14 +1693,14 @@ def handle_callback(cb, token, admin_id):
             with pendingVideoUsersLock:
                 pendingVideoUsers.add(uid)
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": ("🕵️ Send an MP4/WebM file, up to 20 MB — I'll tell whether it looks AI-made." if is_en else "🕵️ Пришли файл MP4/WebM до 20 МБ — скажу, похоже ли на сгенерированное."), "reply_markup": {"inline_keyboard": [[{"text": back_label, "callback_data": "menu:back"}]]}})
-            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "🕵️"})
+            say_toast(token, cb["id"], "video", is_en)
         elif action == "lang_toggle":
             new_lang = "en" if sess.get("ui_lang", "ru") == "ru" else "ru"
             DB.save_session(uid, sess["model"], sess["history"], provider=sess["provider"], tools_enabled=sess["tools_enabled"], engine_mode=sess.get("engine_mode", "native"), ui_lang=new_lang)
             sess["ui_lang"] = new_lang
             s_txt, s_kb = build_menu_settings(sess, is_admin=(uid == admin_id))
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": s_txt, "reply_markup": {"inline_keyboard": s_kb}})
-            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": f"Language: {'EN' if new_lang == 'en' else 'RU'}"})
+            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": ("Language: " if new_lang == "en" else "Язык: ") + ("EN" if new_lang == "en" else "RU")})
 
         elif action == "model":
             m_txt, m_kb = build_models_view(sess, category="text", limit=12, is_admin=(uid == admin_id))
@@ -1682,7 +1708,7 @@ def handle_callback(cb, token, admin_id):
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"]})
         elif action == "provider":
             if uid != admin_id:
-                tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Недоступно", "show_alert": True})
+                say_toast(token, cb["id"], "unavailable", alert=True)
                 return
             avail = available_providers()
             kb = [[{"text": f"{'✅ ' if name == sess['provider'] else ''}{provider_display_name(name)}", "callback_data": f"set_provider:{name}"}] for name in avail]
@@ -1698,10 +1724,10 @@ def handle_callback(cb, token, admin_id):
             u_dir = os.path.join(SESSIONS_ROOT, str(uid))
             if os.path.exists(u_dir): shutil.rmtree(u_dir); os.makedirs(u_dir)
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": ("✅ History reset." if is_en else "✅ История сброшена."), "reply_markup": {"inline_keyboard": [[{"text": back_label, "callback_data": "menu:back"}]]}})
-            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Сброшено"})
+            say_toast(token, cb["id"], "reset", is_en)
         elif action == "status":
             if uid != admin_id:
-                tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Недоступно", "show_alert": True})
+                say_toast(token, cb["id"], "unavailable", alert=True)
                 return
             send_status_text(token, uid)
             tg_send_text(token, uid, build_provider_health_text())
@@ -1709,7 +1735,7 @@ def handle_callback(cb, token, admin_id):
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Статус отправлен"})
         elif action == "help":
             tg_request(token, "sendMessage", {"chat_id": uid, "text": build_help_text(sess, is_admin=(uid == admin_id))})
-            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Помощь отправлена"})
+            say_toast(token, cb["id"], "help_sent", is_en)
         elif action == "top":
             # Old keyboards still carry this route; it lands on the screen that replaced it.
             c_txt, c_kb = build_curious_view(sess)
@@ -1717,7 +1743,7 @@ def handle_callback(cb, token, admin_id):
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"]})
         elif action == "mode":
             if uid != admin_id:
-                tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Недоступно", "show_alert": True})
+                say_toast(token, cb["id"], "unavailable", alert=True)
                 return
             kb = [
                 [{"text": f"{'✅ ' if sess.get('engine_mode', 'native') == 'native' else ''}Native", "callback_data": "set_mode:native"}],
@@ -1728,14 +1754,14 @@ def handle_callback(cb, token, admin_id):
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": "Select mode:", "reply_markup": {"inline_keyboard": kb}})
         elif action == "tools":
             if uid != admin_id:
-                tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Недоступно", "show_alert": True})
+                say_toast(token, cb["id"], "unavailable", alert=True)
                 return
             kb = [[{"text": f"{'✅ ' if sess.get('tools_enabled', True) else ''}On", "callback_data": "set_tools:on"},
                    {"text": f"{'✅ ' if not sess.get('tools_enabled', True) else ''}Off", "callback_data": "set_tools:off"}]]
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": "Tools usage:", "reply_markup": {"inline_keyboard": kb}})
         elif action == "debug":
             if uid != admin_id:
-                tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Недоступно", "show_alert": True})
+                say_toast(token, cb["id"], "unavailable", alert=True)
                 return
             with DEBUG_USERS_LOCK:
                 is_on = uid in DEBUG_USERS
@@ -1745,7 +1771,7 @@ def handle_callback(cb, token, admin_id):
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Debug отправлен"})
         elif action == "users":
             if uid != admin_id:
-                tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Недоступно", "show_alert": True})
+                say_toast(token, cb["id"], "unavailable", alert=True)
                 return
             send_users_text(token, uid, admin_id)
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Users отправлены"})
