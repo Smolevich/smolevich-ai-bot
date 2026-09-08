@@ -27,6 +27,8 @@ Rules that produced themselves the hard way (08.09.2026):
 - **claude mode runs only on a model from `model_routing.CLAUDE_CLI_MODELS`,** and only while the health probe still reaches it. The board ranks models for chat completions; claude-code speaks the Anthropic protocol and cannot talk to most of them.
 - **The model is passed as `--model`, never through `ANTHROPIC_DEFAULT_*_MODEL` alone.** claude-code 2.1.138 resolves a 1M-context model from the env vars to `<id>[1m]`, which no provider has.
 - **The bot's system prompt goes in with `--append-system-prompt`,** or the sandbox answers a greeting with "not a software engineering task".
+- **The system prompt is built per candidate from what that candidate got.** `native_answer` calls `build_system_prompt(is_admin, has_tools)` inside the fallback loop. Promising a shell to a model that was sent no tool schema is what made models type tool calls out as text and invent command output. Note `use_tools` is currently False for every text model: the health cron writes `capabilities` as `capabilities_for_category(category)`, which returns the bare string `"text"`.
+- **A tool call typed out as text is not an answer.** `agent/tool_calls.py` knows the shapes; a reply that is only such a call (or a call plus a run-up under `PSEUDO_CALL_LEADIN_MAX`) is a failed attempt and the next model gets the question. The model that did it loses `model_health.supports_tools`.
 
 The bot and the benchmark share a flock at `/var/lock/acpx.lock` so only one acpx container runs at a time.
 
