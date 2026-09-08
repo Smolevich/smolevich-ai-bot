@@ -783,6 +783,14 @@ def retry_after_seconds(headers):
     return max(0.0, value)
 
 
+def should_show_debug_footer(uid, admin_id):
+    """Подвал с sid, токенами и контекстом — админский, а не «у кого включено»."""
+    if uid != admin_id:
+        return False
+    with DEBUG_USERS_LOCK:
+        return uid in DEBUG_USERS
+
+
 def note_feature_retry_after(kind, seconds, now=None):
     """Запомнить срок, который провайдер назвал в Retry-After для расшифровки/озвучки."""
     if not seconds or seconds <= 0:
@@ -1408,7 +1416,10 @@ def build_help_text(sess, is_admin=False):
         lines.append("Админские инструменты находятся в /menu -> Admin.")
     return "\n".join(lines)
 
-def send_status_text(token, uid):
+def send_status_text(token, uid, admin_id):
+    """Идентификаторы, токены и миллисекунды — только тому, кто их и завёл."""
+    if uid != admin_id:
+        return
     sess = DB.get_session(uid)
     ctx_tokens = estimate_tokens(sess["history"])
     ctx_pct = int((ctx_tokens / MAX_CONTEXT_TOKENS) * 100) if MAX_CONTEXT_TOKENS else 0
@@ -1760,7 +1771,7 @@ def handle_callback(cb, token, admin_id):
             if uid != admin_id:
                 say_toast(token, cb["id"], "unavailable", alert=True)
                 return
-            send_status_text(token, uid)
+            send_status_text(token, uid, admin_id)
             tg_send_text(token, uid, build_provider_health_text())
             tg_send_text(token, uid, build_board_admin_text())
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Статус отправлен"})
@@ -2453,9 +2464,7 @@ def process_update(upd, token, admin_id):
                     runtimeStatus[uid] = st_now
         sid_part = f" | sid: {sid[:8]}" if sid else ""
         raw_reply = ans
-        with DEBUG_USERS_LOCK:
-            is_debug = uid in DEBUG_USERS
-        if is_debug:
+        if should_show_debug_footer(uid, admin_id):
             footer = f"[{provider}/{model_short} | In: {usage['prompt_tokens']} | Out: {usage['completion_tokens']} | Ctx: {estimate_tokens(hist)}/{MAX_CONTEXT_TOKENS}{sid_part}]"
             raw_reply += f"\n\n_{footer}_"
             
