@@ -34,6 +34,7 @@ from agent.acpx_lock import acpx_lock, active_recent
 from agent.benchmark_scoring import score as score_response
 from agent.config import DB_FILE, PROVIDERS, PROXY_URL, SESSIONS_ROOT
 from agent.provider_api import load_provider_key, make_opener
+from agent.rate_limits import capped_max_tokens, output_ceiling, output_ceiling_from_error
 
 LOG_FORMAT = "%(asctime)s %(levelname)s %(message)s"
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, handlers=[logging.StreamHandler(sys.stdout)])
@@ -441,6 +442,26 @@ def _extract_usage(raw: dict[str, Any]) -> dict[str, int]:
     return out
 
 
+def native_payload(
+    provider: str, model_id: str, task: dict[str, Any], sample: dict[str, Any]
+) -> dict[str, Any]:
+    """Тело запроса к провайдеру.
+
+    max_tokens — минимум из того, сколько нужно задаче, и того, сколько провайдер
+    согласен обещать за один запрос. Просить больше бессмысленно: groq отказывает
+    сразу («Request too large … OTPM: Limit 1000, Requested 1024»), и повторы не помогают.
+    """
+    return {
+        "model": model_id,
+        "messages": [
+            {"role": "system", "content": "Ты проходишь короткий benchmark. Следуй инструкциям формата ответа строго."},
+            {"role": "user", "content": build_prompt(task, sample)},
+        ],
+        "temperature": 0,
+        "max_tokens": capped_max_tokens(provider, model_id, int(task.get("max_tokens", 256))),
+    }
+
+
 def native_completion(
     provider: str, model_id: str, task: dict[str, Any], sample: dict[str, Any], timeout: int
 ) -> tuple[str, int, str | None, dict[str, int]]:
@@ -448,16 +469,7 @@ def native_completion(
     api_key = load_provider_key(provider)
     if not api_key:
         return "", 0, "missing_api_key", {}
-    prompt = build_prompt(task, sample)
-    payload = {
-        "model": model_id,
-        "messages": [
-            {"role": "system", "content": "Ты проходишь короткий benchmark. Следуй инструкциям формата ответа строго."},
-            {"role": "user", "content": prompt},
-        ],
-        "temperature": 0,
-        "max_tokens": int(task.get("max_tokens", 256)),
-    }
+    payload = native_payload(provider, model_id, task, sample)
     opener = make_opener(prov.get("proxy", False))
     started = time.time()
     req = urllib.request.Request(
@@ -496,6 +508,12 @@ def native_completion(
             body = e.read().decode("utf-8", errors="replace")[:300]
         except Exception:
             pass
+        # Потолок выходных токенов приходит только здесь, в теле 429, и таблица в
+        # agent/rate_limits.py умеет устаревать молча. Пусть скажет.
+        told = output_ceiling_from_error(body)
+        if told and told != output_ceiling(provider, model_id):
+            log.warning("%s/%s: провайдер называет потолок OTPM %s — таблица в agent/rate_limits.py устарела",
+                        provider, model_id, told)
         return "", int((time.time() - started) * 1000), f"HTTP {e.code}: {e.reason} {body}".strip(), {}
     except Exception as e:
         return "", int((time.time() - started) * 1000), str(e)[:500], {}

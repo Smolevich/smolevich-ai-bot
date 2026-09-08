@@ -148,6 +148,18 @@ GSM8K is solid for the free-tier band today but only covers grade-school math an
 
 First picks if/when we extend: MMLU-Pro (best discrimination), MATH-500 (reuses GSM8K-style scorer), IFEval (different axis, cheap).
 
+## Provider ceilings
+
+`max_tokens` в запросе — минимум из того, что просит задача, и того, что провайдер
+согласен обещать за один запрос (`agent/rate_limits.py`, `capped_max_tokens`). Просить
+больше бесполезно: groq отказывает сразу и повторы не помогают — `qwen/qwen3.8-27b`
+вернул «OTPM: Limit 1000, Requested 1024» 96 раз за 04–08.09.2026, при том что набор
+задач просит 1024/1536/2048.
+
+Таблицу потолков сверяем **с ответами провайдеров**, не с сайтом: `x-ratelimit-*` в
+заголовках (там TPM и RPM) и тело 429 (только там OTPM). Если провайдер называет потолок,
+которого нет в таблице, `native_completion` пишет об этом WARNING в лог замера.
+
 ## Concurrency & locking
 
 - **`/var/lock/acpx.lock`** — shared flock between the bot's claude chat handler and the benchmark's claude task. Only one acpx/podman container runs at a time. `BOT_ACPX_LOCK_WAIT` controls how long a user chat waits before responding "agent busy" (default 30 s).

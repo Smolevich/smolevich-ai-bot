@@ -7,9 +7,10 @@ TASK_QUEUE = "smolevich-bench"
 CLAUDE_TASK_QUEUE = "smolevich-bench-claude"
 TERMINAL_ERROR_TYPE = "BenchmarkTerminalError"
 
-# Measured from the providers' own headers on 2026-08-17:
-#   groq      x-ratelimit-limit-tokens: 6000 per minute — at ~1500 tokens an answer that is
-#             four requests a minute, no matter how few connections we open;
+# Re-measured from the providers' own `x-ratelimit-*` headers on 2026-09-08 (the numbers
+# from 2026-08-17 had moved: groq said 6000 tokens/min then, it says 8000 now):
+#   groq      allam-2-7b 7000 req/min, 6000 tok/min; gpt-oss-20b/120b and qwen3.6/3.8-27b
+#             1000 req/min, 8000 tok/min; compound-mini 250 req/day, 70000 tok.
 #   nvidia / openrouter: no 429 at all across 480 samples, so they keep three at a time.
 # Hence one at a time for groq — parallelism cannot buy throughput that the per-minute
 # ceiling does not allow, it only converts it into rejections.
@@ -18,8 +19,12 @@ DEFAULT_CONCURRENCY = 1
 
 # Concurrency alone did not help: groq limits requests per minute, so 20 samples fired back
 # to back still 429 (80 of 125 groq calls on 2026-08-13). Pause between chunks to stay under
-# the per-minute ceiling: 6000 tokens/min ÷ ~1500 per answer ≈ 16s. Five and nine seconds
-# still produced 22% and 35% rejections over two days.
+# the per-minute ceiling. Five and nine seconds produced 22% and 35% rejections over two days.
+#
+# 16s is kept even though the token ceiling rose to 8000/min: on qwen3.8-27b the binding
+# limit is not the one in the headers but the output-token ceiling, which groq reveals only
+# in the body of a 429 (OTPM: Limit 1000). Per-request budgets against it live in
+# agent/rate_limits.py, which the benchmark applies to max_tokens.
 PROVIDER_PAUSE_SEC = {"groq": 16.0, "openrouter": 1.0, "nvidia": 0.5}
 DEFAULT_PAUSE_SEC = 2.0
 
