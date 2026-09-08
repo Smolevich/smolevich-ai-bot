@@ -37,6 +37,7 @@ from agent.text import (
     compact_messages_for_provider,
     estimate_tokens,
     sanitize_model_id,
+    unavailable_message,
 )
 from agent import model_routing, quota
 from agent.entities import normalize_list_markers, parse_markdown_to_entities
@@ -74,6 +75,10 @@ pendingTranslateUsers = set()
 pendingTranslateUsersLock = threading.Lock()
 DEBUG_USERS = set()
 DEBUG_USERS_LOCK = threading.Lock()
+# Когда провайдер расшифровки/озвучки назвал срок возврата — храним его, чтобы
+# «сейчас недоступно» могло сказать «через сколько», а не оборвать разговор.
+featureRetryAfter = {}
+featureRetryAfterLock = threading.Lock()
 TELEGRAM_BOT_FILE_DOWNLOAD_LIMIT_BYTES = 20 * 1024 * 1024
 STT_PROVIDER = "groq"
 TTS_PROVIDER = "groq"
@@ -535,8 +540,12 @@ def transcribe_audio_for_provider(provider, audio_bytes, filename, model, langua
         },
     )
     opener = make_opener(prov.get("proxy", False))
-    with opener.open(req, timeout=120) as resp:
-        data = json.loads(resp.read().decode())
+    try:
+        with opener.open(req, timeout=120) as resp:
+            data = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        note_feature_retry_after("stt", retry_after_seconds(e.headers))
+        raise
     return (data.get("text") or "").strip(), provider, target_model
 
 
@@ -567,8 +576,12 @@ def tts_for_provider(provider, text, model):
         },
     )
     opener = make_opener(prov.get("proxy", False))
-    with opener.open(req, timeout=120) as resp:
-        return resp.read(), provider, target_model
+    try:
+        with opener.open(req, timeout=120) as resp:
+            return resp.read(), provider, target_model
+    except urllib.error.HTTPError as e:
+        note_feature_retry_after("tts", retry_after_seconds(e.headers))
+        raise
 
 
 def transcribe_audio_with_fallback(selected_provider, audio_bytes, filename, model):
@@ -768,6 +781,24 @@ def retry_after_seconds(headers):
     if value > 1e9:
         value -= time.time()
     return max(0.0, value)
+
+
+def note_feature_retry_after(kind, seconds, now=None):
+    """Запомнить срок, который провайдер назвал в Retry-After для расшифровки/озвучки."""
+    if not seconds or seconds <= 0:
+        return
+    now = time.time() if now is None else now
+    with featureRetryAfterLock:
+        featureRetryAfter[kind] = now + seconds
+
+
+def feature_retry_after_sec(kind, now=None):
+    """Сколько ещё ждать по последнему ответу провайдера, или None — если он молчал."""
+    now = time.time() if now is None else now
+    with featureRetryAfterLock:
+        deadline = featureRetryAfter.get(kind, 0)
+    left = deadline - now
+    return left if left > 0 else None
 
 
 def format_bytes(size: int) -> str:
@@ -1671,7 +1702,7 @@ def handle_callback(cb, token, admin_id):
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": ("Switched to text model" if switched and is_en else ("Переключил на текстовую модель" if switched else "Код"))})
         elif action in ("voice", "stt"):
             if not has_stt_models():
-                tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "STT сейчас недоступен", "show_alert": True})
+                tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": unavailable_message("stt", feature_retry_after_sec("stt"), is_en), "show_alert": True})
                 return
             with pendingSttUsersLock:
                 pendingSttUsers.add(uid)
@@ -1679,7 +1710,7 @@ def handle_callback(cb, token, admin_id):
             say_toast(token, cb["id"], "stt", is_en)
         elif action == "tts":
             if not has_tts_models():
-                tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "TTS сейчас недоступен", "show_alert": True})
+                tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": unavailable_message("tts", feature_retry_after_sec("tts"), is_en), "show_alert": True})
                 return
             with pendingTtsUsersLock:
                 pendingTtsUsers.add(uid)
@@ -1688,7 +1719,7 @@ def handle_callback(cb, token, admin_id):
         elif action == "video":
             _, video_model = pick_video_detector()
             if not video_model:
-                tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "VideoDetect сейчас недоступен", "show_alert": True})
+                tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": unavailable_message("video", feature_retry_after_sec("video"), is_en), "show_alert": True})
                 return
             with pendingVideoUsersLock:
                 pendingVideoUsers.add(uid)
@@ -1806,14 +1837,14 @@ def handle_quick_action(action, uid, token, admin_id, message_id=None):
         tg_send_text(token, uid, "💬 Ask anything — I'll answer." if is_en else "💬 Пиши вопрос — отвечу.")
     elif action == "stt":
         if not has_stt_models():
-            tg_send_text(token, uid, "Transcription is unavailable right now." if is_en else "Расшифровка сейчас недоступна.")
+            tg_send_text(token, uid, unavailable_message("stt", feature_retry_after_sec("stt"), is_en))
             return True
         with pendingSttUsersLock:
             pendingSttUsers.add(uid)
         tg_send_text(token, uid, "🎙 Send a voice message or an audio file." if is_en else "🎙 Пришли голосовое или аудиофайл.")
     elif action == "tts":
         if not has_tts_models():
-            tg_send_text(token, uid, "Voicing is unavailable right now." if is_en else "Озвучка сейчас недоступна.")
+            tg_send_text(token, uid, unavailable_message("tts", feature_retry_after_sec("tts"), is_en))
             return True
         with pendingTtsUsersLock:
             pendingTtsUsers.add(uid)
@@ -2097,23 +2128,13 @@ def process_update(upd, token, admin_id):
                 provider, selected_model = pick_video_detector()
                 if not selected_model:
                     is_en = sess_for_media.get("ui_lang", "ru") == "en"
-                    tg_send_text(token, uid, "❌ Video detection is unavailable right now."
-                                 if is_en else "❌ Проверка видео сейчас недоступна.")
+                    tg_send_text(token, uid, unavailable_message("video", feature_retry_after_sec("video"), is_en))
                     return
                 model_info = DB.get_model_info(provider, selected_model)
                 if model_info and not model_info.get("available", False):
-                    ago = int(time.time()) - int(model_info.get("last_check") or 0)
-                    if ago < 60:
-                        checked = "just now"
-                    elif ago < 3600:
-                        checked = f"{ago // 60}m ago"
-                    else:
-                        checked = f"{ago // 3600}h ago"
-                    tg_send_text(
-                        token,
-                        uid,
-                        "Проверка видео сейчас не работает. Попробуй позже.",
-                    )
+                    tg_send_text(token, uid, unavailable_message(
+                        "video", feature_retry_after_sec("video"),
+                        sess_for_media.get("ui_lang", "ru") == "en"))
                     return
                 media = msg.get("video") or msg.get("animation") or msg.get("document")
                 mime_type = str((media or {}).get("mime_type", "")).lower()

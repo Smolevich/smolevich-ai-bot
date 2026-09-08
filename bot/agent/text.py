@@ -179,3 +179,28 @@ def strip_markdown_v2_escapes(text: str) -> str:
     if not text:
         return text
     return MDV2_UNESCAPE_RE.sub(r"\1", text)
+
+
+# Функции без «модели», «провайдера» и «STT» — человеку называется само действие.
+FEATURE_NAMES = {
+    "stt": {"ru": "Расшифровка", "en": "Transcription"},
+    "tts": {"ru": "Озвучка", "en": "Voicing"},
+    "video": {"ru": "Проверка видео", "en": "Video check"},
+}
+
+
+def unavailable_message(kind: str, retry_after_sec: float | None = None, is_en: bool = False) -> str:
+    """«Сейчас недоступно» плюс срок, если провайдер его назвал.
+
+    Без срока число не выдумывается: печатать «(None)» бот уже пробовал.
+    """
+    lang = "en" if is_en else "ru"
+    name = FEATURE_NAMES.get(kind, {}).get(lang) or ("This" if is_en else "Это")
+    if retry_after_sec and retry_after_sec > 0:
+        minutes = max(1, int(round(retry_after_sec / 60)))
+        return (f"{name} is unavailable right now — try again in about {minutes} min."
+                if is_en else
+                f"{name} сейчас недоступна — попробуй примерно через {minutes} мин.")
+    return (f"{name} is unavailable right now — try again a bit later."
+            if is_en else
+            f"{name} сейчас недоступна — попробуй чуть позже.")
