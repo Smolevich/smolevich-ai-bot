@@ -1715,7 +1715,10 @@ def handle_callback(cb, token, admin_id):
             s_txt, s_kb = build_menu_settings(sess, is_admin=(uid == admin_id))
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": s_txt, "reply_markup": {"inline_keyboard": s_kb}})
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"]})
-        elif action == "admin" and uid == admin_id:
+        elif action == "admin":
+            if uid != admin_id:
+                say_toast(token, cb["id"], "unavailable", alert=True)
+                return
             a_txt, a_kb = build_admin_menu(sess)
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": a_txt, "reply_markup": {"inline_keyboard": a_kb}})
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"]})
@@ -1843,6 +1846,12 @@ def handle_callback(cb, token, admin_id):
                 return
             send_users_text(token, uid, admin_id)
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Users отправлены"})
+        else:
+            # Экран мог исчезнуть, а кнопка на него — остаться в чьей-то переписке.
+            # Ветки нет, но спиннер обязан погаснуть.
+            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"]})
+    else:
+        tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"]})
 
 def take_pending_tts(uid):
     """Consume the one-shot TTS flag: True means this text must come back as audio."""

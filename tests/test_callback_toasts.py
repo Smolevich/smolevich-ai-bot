@@ -127,6 +127,19 @@ class SpokenInRussian(unittest.TestCase):
         self.assertEqual(toasts_for("menu:lang_toggle"), ["Language: EN"])
 
 
+class EveryPressIsAnswered(unittest.TestCase):
+    """Кнопка без ветки в маршрутизаторе — это крутящийся спиннер до таймаута Telegram."""
+
+    def test_a_stale_admin_button_does_not_spin(self):
+        self.assertTrue(toasts_for("menu:admin"))
+
+    def test_an_unknown_menu_route_does_not_spin(self):
+        self.assertEqual(len(toasts_for("menu:whatever-we-removed")), 1)
+
+    def test_an_unknown_callback_altogether_does_not_spin(self):
+        self.assertEqual(len(toasts_for("some_button_from_2024:1")), 1)
+
+
 class ParticularWordings(unittest.TestCase):
     def test_a_switch_that_did_not_apply_says_so_in_russian(self):
         said = toasts_for("set_model:a/b", edit_ok=False)
