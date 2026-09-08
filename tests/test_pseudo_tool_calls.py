@@ -166,9 +166,15 @@ class AnEmptyPretendCallIsAFailedAttempt(unittest.TestCase):
         _, marked = ask(REPORTED)
         marked.assert_called_once_with("openrouter", "m/model")
 
-    def test_an_answer_that_also_has_words_still_answers(self):
-        (ans, _, _), _ = ask("Держи:\n" + REPORTED)
-        self.assertEqual(ans, "Держи:")
+    def test_a_run_up_to_the_call_is_not_an_answer_either(self):
+        """Live on the box: stripping the block left «Ищу новости прямо сейчас.» — a promise."""
+        (ans, _, meta), _ = ask("Ищу новости прямо сейчас.\n" + REPORTED)
+        self.assertIsNone(ans)
+
+    def test_a_real_answer_around_the_call_survives(self):
+        (ans, _, _), _ = ask("Свежих новостей назвать не могу — в интернет я не хожу, "
+                             "знания заканчиваются раньше. Загляни в Google Новости.\n" + REPORTED)
+        self.assertTrue(ans.startswith("Свежих новостей"))
 
 
 class TheChainMovesOn(unittest.TestCase):

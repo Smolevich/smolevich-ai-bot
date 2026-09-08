@@ -131,6 +131,13 @@ TOOLS = [
 TOOL_HANDLERS = {"get_weather": lambda a: tool_get_weather(a["city"]), "get_exchange_rate": lambda a: tool_get_exchange_rate(a["from_currency"], a["to_currency"], a.get("amount", 1))}
 
 
+# Text left around a typed-out tool call this short is the run-up to it, not an answer:
+# stripping the block off «Ищу новости прямо сейчас.\n<tool_call>…» leaves a promise the
+# bot never keeps. The real one measured 25 characters; the shortest genuine answer seen
+# next to a call, «в интернет не хожу, знания заканчиваются раньше…», ran to 110.
+PSEUDO_CALL_LEADIN_MAX = 60
+
+
 def provider_of(api_url):
     """Which provider an endpoint belongs to. ask_llm is handed a URL, not a name."""
     for name, cfg in PROVIDERS.items():
@@ -936,10 +943,11 @@ def ask_llm(api_url, api_key, model, messages, uid=None, admin_id=None, use_tool
                                              f"Result of that command:\n{result}\n\nAnswer the question from it."})
                             continue
                         content = tool_calls.strip_pseudo_calls(content)
-                        if not content:
-                            # Nothing but the make-believe call. That is a failed attempt, and the
-                            # next model in the ranking gets the question.
-                            log.warning(f"{model} answered with a textual tool call and nothing else")
+                        if len(content) < PSEUDO_CALL_LEADIN_MAX:
+                            # Nothing but the make-believe call, or the sentence that introduced
+                            # it — «Ищу новости прямо сейчас.» is a promise, not an answer. Failed
+                            # attempt: the next model in the ranking gets the question.
+                            log.warning(f"{model} answered with a textual tool call and {len(content)} chars around it")
                             meta["error"] = "pseudo_tool_call"
                             return None, usage, meta
                     if content:
