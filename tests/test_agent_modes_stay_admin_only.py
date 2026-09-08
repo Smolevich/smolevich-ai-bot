@@ -72,9 +72,19 @@ class NonAdmin(unittest.TestCase):
 
 
 class Admin(unittest.TestCase):
-    def test_the_admin_is_still_told_the_run_was_rerouted(self):
+    def test_the_admin_gets_the_answer_and_not_a_note_about_engines(self):
+        """The «Режим claude работает только на openrouter» notice is gone for good.
+
+        Which engine answered and on what model is routing, not conversation; the admin
+        already has it in the debug footer and in request_log.
+        """
         with mock.patch.object(bot, "harness_target", return_value=("openrouter", "picked/model", True)):
-            self.assertIn("Режим", ask(ADMIN))
+            said = ask(ADMIN)
+        self.assertNotIn("Режим", said)
+
+    def test_the_admin_still_gets_an_answer(self):
+        with mock.patch.object(bot, "harness_target", return_value=("openrouter", "picked/model", True)):
+            self.assertIn("ответ", ask(ADMIN))
 
 
 if __name__ == "__main__":

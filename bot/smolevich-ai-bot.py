@@ -37,6 +37,7 @@ from agent.text import (
     compact_messages_for_provider,
     estimate_tokens,
     sanitize_model_id,
+    strip_reasoning,
     unavailable_message,
 )
 from agent import model_routing, quota
@@ -1052,6 +1053,40 @@ def pick_leader():
 
 
 def answer_with_fallback(uid, admin_id, sess, hist, prompt_text, sys_prompt):
+    """The one way anyone — the admin included — gets an answer.
+
+    A sandboxed mode is tried first when the session asks for one, and exactly once: any
+    failure at all drops through to the native chain with the same history. The sandbox
+    used to answer for the admin on its own, so when its CLI could not resolve the model
+    the CLI's own "Internal error: There's an issue with the selected model (…[1m])"
+    went straight into the chat and nothing else was tried.
+
+    Returns (answer|None, usage, meta, provider, model).
+    """
+    live = live_pairs()
+    current = (sess.get("provider") or PROVIDER_DEFAULT, sess.get("model") or "")
+    mode = model_routing.engine_mode_for(
+        sess.get("engine_mode"), uid == admin_id,
+        claude_model=model_routing.claude_cli_candidate(live, preferred=current))
+    if mode != "native":
+        agent = acp_agent_for_mode(mode)
+        target = harness_target(agent, current[0], sanitize_model_id(current[1]), live=live)
+        ans, usage, meta = ask_via_acpx(uid, prompt_text, dict(sess, engine_mode=mode),
+                                        sys_prompt=sys_prompt, target=target)
+        if ans:
+            meta["mode"] = mode
+            # Stripped here as well as at the send point: the scratchpad must not reach the
+            # chat, and it must not reach the history the next question is asked with.
+            return strip_reasoning(ans), usage, meta, target[0], target[1]
+        DB.log_request(uid, target[0], target[1], 0, 0, meta.get("finish_reason"), 0,
+                       meta.get("error"), mode=mode, request_http_ms=0)
+        log.warning(f"{mode} mode failed with {meta.get('error')}; answering natively instead")
+    ans, usage, meta, provider, model = native_answer(uid, admin_id, sess, hist, prompt_text, sys_prompt)
+    meta["mode"] = "native"
+    return ans, usage, meta, provider, model
+
+
+def native_answer(uid, admin_id, sess, hist, prompt_text, sys_prompt):
     """Ask the ranking in order until something answers.
 
     Returns (answer|None, usage, meta, provider, model). Every attempt — including the
@@ -1762,7 +1797,10 @@ def handle_callback(cb, token, admin_id):
             tg_request(token, "editMessageText", {"chat_id": cb["message"]["chat"]["id"], "message_id": cb["message"]["message_id"], "text": f"✅ Tools: {mode}"})
     elif data == "reset_context":
         sess = DB.get_session(uid)
-        DB.save_session(uid, sess["model"], [], provider=sess["provider"], tools_enabled=sess["tools_enabled"], engine_mode=sess.get("engine_mode", "native"))
+        # A reset returns the engine to native too. A session pinned to an agent mode kept
+        # answering through it after every reset, so the admin's own row sat in `claude`
+        # for weeks and nobody remembered choosing it.
+        DB.save_session(uid, sess["model"], [], provider=sess["provider"], tools_enabled=sess["tools_enabled"], engine_mode="native")
         DB.set_last_session_id(uid, "")
         with runtimeStatusLock:
             runtimeStatus.pop(uid, None)
@@ -1869,7 +1907,7 @@ def handle_callback(cb, token, admin_id):
             kb.append([{"text": back_label, "callback_data": "menu:model"}])
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": ("Where answers come from" if is_en else "Откуда брать ответы"), "reply_markup": {"inline_keyboard": kb}})
         elif action == "reset":
-            DB.save_session(uid, sess["model"], [], provider=sess["provider"], tools_enabled=sess["tools_enabled"], engine_mode=sess.get("engine_mode", "native"))
+            DB.save_session(uid, sess["model"], [], provider=sess["provider"], tools_enabled=sess["tools_enabled"], engine_mode="native")
             DB.set_last_session_id(uid, "")
             with runtimeStatusLock:
                 runtimeStatus.pop(uid, None)
@@ -2535,24 +2573,13 @@ def process_update(upd, token, admin_id):
 
         sys_prompt = build_system_prompt(is_admin=(uid == admin_id))
 
-        # The menu gates agent modes on admin, but the execution path did not: a session row
-        # left on 'claude' sent a real user into a 135-second sandbox with no way out.
-        mode = sess.get("engine_mode", "native")
-        if mode != "native" and uid != admin_id:
-            mode = "native"
         from agent.telegram_api import tg_send_chat_action
         tg_send_chat_action(token, uid, action="typing")
         stop_typing = keep_typing(token, uid)
-        if mode in ("claude", "opencode", "pi"):
-            agent_name = acp_agent_for_mode(mode)
-            _p, _m, switched = harness_target(agent_name, provider, model)
-            # Режимы, провайдеры и имена моделей — служебная записка админу; человек
-            # сюда не попадает, но и второй замок ничего не стоит.
-            if switched and uid == admin_id:
-                tg_send_text(token, uid, f"ℹ️ Режим {agent_name} работает только на {_p} — отвечаю моделью {_m}.")
-            ans, usage, meta = ask_via_acpx(uid, text, sess)
-        else:
-            ans, usage, meta, provider, model = answer_with_fallback(uid, admin_id, sess, hist, text, sys_prompt)
+        # One door for everybody. Choosing the engine, running the sandbox and falling back
+        # to the native chain all happen inside; nothing here knows which one answered.
+        ans, usage, meta, provider, model = answer_with_fallback(uid, admin_id, sess, hist, text, sys_prompt)
+        mode = meta.get("mode", "native")
         if not ans:
             # Every candidate refused. This is the only moment the person hears about it,
             # and they hear it without model ids, provider names or HTTP codes.
@@ -2566,7 +2593,7 @@ def process_update(upd, token, admin_id):
             return
         DB.add_usage(uid, usage['prompt_tokens'], usage['completion_tokens'])
         req_id = DB.log_request(uid, provider, model, usage['prompt_tokens'], usage['completion_tokens'],
-                                meta['finish_reason'], meta['tool_calls_total'], meta['error'], mode=sess.get("engine_mode", "native"), request_http_ms=meta.get("http_latency_ms", 0))
+                                meta['finish_reason'], meta['tool_calls_total'], meta['error'], mode=mode, request_http_ms=meta.get("http_latency_ms", 0))
         with runtimeStatusLock:
             st_now = dict(runtimeStatus.get(uid, {}))
             st_now["last_rate_limits"] = meta.get("rate_limits", {}) or {}
