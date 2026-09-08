@@ -1150,20 +1150,99 @@ HARNESS_PROVIDERS = {
     "pi": ("openrouter", "groq"),
 }
 
+ACPX_APPEND_SYSTEM_PROMPT = "Be concise. Execute directly. Return only essential output and short conclusions."
 
-def harness_target(agent, provider, model):
-    """(provider, model, switched) — a harness run must not go to a provider that cannot answer it."""
+
+def live_pairs():
+    """(provider, model) the health probe still reaches — the set every mode picks from."""
+    now = int(time.time())
+    parked = model_routing.parked_providers(DB.get_provider_state(), now)
+    return model_routing.live_candidates(DB.get_live_text_rows(), now, parked=parked)
+
+
+def claude_cli_model_now():
+    """The verified pair claude mode would run on right now, or None if there is none."""
+    return model_routing.claude_cli_candidate(live_pairs())
+
+
+def harness_target(agent, provider, model, live=None):
+    """(provider, model, switched) — a harness run must not go where it cannot be answered.
+
+    For `claude` the provider is not enough. The CLI needs a model from the verified
+    whitelist: the leader of the measurement is picked for answering chat completions,
+    and sending it into claude-code produced "There's an issue with the selected model".
+    """
+    if agent == "claude":
+        picked = model_routing.claude_cli_candidate(
+            live_pairs() if live is None else live, preferred=(provider, model))
+        if picked:
+            return picked[0], picked[1], picked != (provider, model)
     if provider in HARNESS_PROVIDERS.get(agent, ("openrouter",)):
         return provider, model, False
     fallback = "openrouter"
     picked = DB.pick_default_text_model(fallback) or PROVIDERS[fallback]["default_model"]
     return fallback, picked, True
 
-def ask_via_acpx(uid, text, sess):
+
+def mask_secrets(argv, env):
+    """Command line for the log with every key value replaced by its name.
+
+    The acpx line was logged verbatim, so the OpenRouter key sat in plain text in
+    journald for anyone with read access to the unit's logs.
+    """
+    secrets = {str(env.get(name) or ""): name
+               for name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")}
+    secrets.pop("", None)
+    out = []
+    for part in argv:
+        for value, name in secrets.items():
+            part = part.replace(value, f"<{name}>")
+        out.append(part)
+    return out
+
+
+CLI_ERROR_MARKERS = (
+    "internal error:",
+    "api error:",
+    "issue with the selected model",
+    "run --model to pick a different model",
+    "rerun with `--verbose`",
+)
+
+
+def looks_like_cli_error(text):
+    """True when the sandbox printed a diagnostic where an answer should have been.
+
+    acpx exits 0 while claude-code writes `Internal error: There's an issue with the
+    selected model (…)` to stdout, and the exit code alone let that through as the answer.
+    """
+    head = (text or "").strip().lower()[:400]
+    return any(marker in head for marker in CLI_ERROR_MARKERS)
+
+
+def acpx_failure(uid, finish_reason, error, session_id):
+    """A sandbox run that produced no answer. The reason goes to the log, never to the chat."""
+    with runtimeStatusLock:
+        st = runtimeStatus.get(uid, {})
+        st.update({"active": False, "last_error_ts": int(time.time())})
+        runtimeStatus[uid] = st
+    return None, {"prompt_tokens": 0, "completion_tokens": 0}, {
+        "finish_reason": finish_reason, "tool_calls_total": 0, "error": error,
+        "session_id": session_id, "http_latency_ms": 0, "rate_limits": {},
+        "status": None, "retry_after_sec": None}
+
+
+def ask_via_acpx(uid, text, sess, sys_prompt="", target=None):
+    """Run the question inside the sandbox. Returns (answer|None, usage, meta).
+
+    A failure returns None: the words a person reads are decided by the caller, and the
+    CLI's own "Internal error: There's an issue with the selected model (…)" is not one
+    of them.
+    """
     try:
         mode = sess.get("engine_mode", "native")
         agent = acp_agent_for_mode(mode)
-        harness_provider, harness_model, harness_switched = harness_target(
+        harness_provider, harness_model, _switched = target or harness_target(
             agent, sess.get("provider", PROVIDER_DEFAULT), sanitize_model_id(sess.get("model") or ""))
         mode_model = harness_model
         sess = dict(sess, provider=harness_provider, model=harness_model)
@@ -1215,7 +1294,10 @@ def ask_via_acpx(uid, text, sess):
         env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = mode_model
         env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = mode_model
         env["CLAUDE_CODE_SUBAGENT_MODEL"] = mode_model
-        env["ACPX_APPEND_SYSTEM_PROMPT"] = "Be concise. Execute directly. Return only essential output and short conclusions."
+        # The bot's own instructions, not claude-code's: without them the sandbox answered
+        # "This is just a casual greeting, not a software engineering task."
+        append_prompt = ((sys_prompt + " ") if sys_prompt else "") + ACPX_APPEND_SYSTEM_PROMPT
+        env["ACPX_APPEND_SYSTEM_PROMPT"] = append_prompt
         # Force non-interactive permission behavior in claude-agent-acp settings.
         claude_cfg_dir = os.path.join(cwd, ".claude")
         try:
@@ -1291,11 +1373,16 @@ def ask_via_acpx(uid, text, sess):
             "localhost/acpx-claude:latest",
         ]
         if agent == "claude":
-            # Route Claude mode through acpx wrapper for consistent model/env handling.
+            # `--model` is not a nicety. Left to the ANTHROPIC_DEFAULT_*_MODEL env vars,
+            # claude-code 2.1.138 resolves a 1M-context model to `<id>[1m]` and asks
+            # OpenRouter for a model that does not exist; passed explicitly it goes out
+            # over ACP session/set_model verbatim.
             run_cmd = podman_base + [
                 "acpx", "--cwd", "/workspace", "--format", "text",
                 "--approve-all", "--non-interactive-permissions", "deny",
                 "--timeout", acpx_timeout,
+                "--model", mode_model,
+                "--append-system-prompt", append_prompt,
                 "claude", "exec", text,
             ]
         elif agent == "pi":
@@ -1336,7 +1423,7 @@ def ask_via_acpx(uid, text, sess):
                 "--timeout", acpx_timeout,
                 agent, "exec", text,
             ]
-        log.info(f"acpx run: {shlex.join(run_cmd[:-1] + ['<task>'])}")
+        log.info(f"acpx run: {shlex.join(mask_secrets(run_cmd[:-1], env) + ['<task>'])}")
         touch_active()
         lock_wait = float(os.environ.get("BOT_ACPX_LOCK_WAIT", "30") or 30)
         with acpx_lock(timeout=lock_wait, holder=f"user:{uid}") as got_lock:
@@ -1345,11 +1432,7 @@ def ask_via_acpx(uid, text, sess):
                     st = runtimeStatus.get(uid, {})
                     st.update({"active": False, "last_error_ts": int(time.time())})
                     runtimeStatus[uid] = st
-                return (
-                    "⏳ Агент сейчас занят другой задачей, попробуйте через минуту.",
-                    {"prompt_tokens": 0, "completion_tokens": 0},
-                    {"finish_reason": "acpx_busy", "tool_calls_total": 0, "error": "lock_busy", "session_id": session_uuid},
-                )
+                return acpx_failure(uid, "acpx_busy", "lock_busy", session_uuid)
             r = subprocess.run(run_cmd, capture_output=True, text=True, timeout=180, env=env)
         out = strip_acp_noise(r.stdout or "")
         err = (r.stderr or "").strip()
@@ -1360,37 +1443,23 @@ def ask_via_acpx(uid, text, sess):
         except Exception:
             pass
 
-        if r.returncode == 0 and out:
+        if r.returncode == 0 and out and not looks_like_cli_error(out):
             with runtimeStatusLock:
                 st = runtimeStatus.get(uid, {})
                 st.update({"active": False, "last_ok_ts": int(time.time())})
                 runtimeStatus[uid] = st
             return out, {"prompt_tokens": 0, "completion_tokens": 0}, {"finish_reason": f"acpx_{agent}", "tool_calls_total": 0, "error": None, "session_id": session_uuid}
         msg = err or out or f"acpx prompt failed with exit {r.returncode}"
-        log.error(f"acpx failed, raw log: {raw_log}")
-        with runtimeStatusLock:
-            st = runtimeStatus.get(uid, {})
-            st.update({"active": False, "last_error_ts": int(time.time())})
-            runtimeStatus[uid] = st
-        return f"Не справился с задачей.\n{msg[:300]}", {"prompt_tokens": 0, "completion_tokens": 0}, {"finish_reason": "acpx_error", "tool_calls_total": 0, "error": msg[:200], "session_id": session_uuid}
+        log.error(f"acpx failed ({msg[:200]}), raw log: {raw_log}")
+        return acpx_failure(uid, "acpx_error", msg[:200], session_uuid)
     except FileNotFoundError:
-        with runtimeStatusLock:
-            st = runtimeStatus.get(uid, {})
-            st.update({"active": False, "last_error_ts": int(time.time())})
-            runtimeStatus[uid] = st
-        return "Этот режим сейчас недоступен.", {"prompt_tokens": 0, "completion_tokens": 0}, {"finish_reason": "acpx_missing", "tool_calls_total": 0, "error": "acpx_missing", "session_id": locals().get("session_uuid", "")}
+        return acpx_failure(uid, "acpx_missing", "acpx_missing", locals().get("session_uuid", ""))
     except subprocess.TimeoutExpired:
-        with runtimeStatusLock:
-            st = runtimeStatus.get(uid, {})
-            st.update({"active": False, "last_error_ts": int(time.time())})
-            runtimeStatus[uid] = st
-        return "Слишком долго — прервал. Попробуй задачу попроще.", {"prompt_tokens": 0, "completion_tokens": 0}, {"finish_reason": "acpx_timeout", "tool_calls_total": 0, "error": "timeout", "session_id": locals().get("session_uuid", "")}
+        return acpx_failure(uid, "acpx_timeout", "timeout", locals().get("session_uuid", ""))
     except Exception as e:
-        with runtimeStatusLock:
-            st = runtimeStatus.get(uid, {})
-            st.update({"active": False, "last_error_ts": int(time.time())})
-            runtimeStatus[uid] = st
-        return f"❌ ACP mode exception: {e}", {"prompt_tokens": 0, "completion_tokens": 0}, {"finish_reason": "acpx_exception", "tool_calls_total": 0, "error": str(e)[:200], "session_id": locals().get("session_uuid", "")}
+        log.error(f"acpx exception: {e}")
+        return acpx_failure(uid, "acpx_exception", str(e)[:200], locals().get("session_uuid", ""))
+
 
 def build_system_prompt(is_admin=False):
     """The sandbox has no network for plain users, so only an admin may be told about the web."""
@@ -1674,6 +1743,9 @@ def handle_callback(cb, token, admin_id):
             return
         mode = data.split(":", 1)[1]
         sess = DB.get_session(uid)
+        if mode == "claude" and not claude_cli_model_now():
+            tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Ни одна проверенная модель сейчас не отвечает через claude CLI.", "show_alert": True})
+            return
         DB.save_session(uid, sess["model"], sess["history"], provider=sess["provider"], tools_enabled=sess["tools_enabled"], engine_mode=mode)
         tg_request(token, "editMessageText", {"chat_id": cb["message"]["chat"]["id"], "message_id": cb["message"]["message_id"], "text": f"✅ Mode: {mode}"})
     elif data.startswith("set_tools:"):
@@ -1733,7 +1805,14 @@ def handle_callback(cb, token, admin_id):
             if uid != admin_id:
                 say_toast(token, cb["id"], "unavailable", alert=True)
                 return
-            use_provider, use_model, switched = ensure_text_model_for_session(sess)
+            # This button is what put the admin's row into `claude` in the first place, and
+            # it handed the sandbox whatever model the measurement liked that day. The CLI
+            # needs a model from the verified list, so without one the mode stays off.
+            claude_pair = claude_cli_model_now()
+            if not claude_pair:
+                tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Ни одна проверенная модель сейчас не отвечает через claude CLI.", "show_alert": True})
+                return
+            use_provider, use_model, switched = claude_pair[0], claude_pair[1], claude_pair != (sess.get("provider"), sess.get("model"))
             DB.save_session(uid, use_model, sess["history"], provider=use_provider, tools_enabled=sess["tools_enabled"], engine_mode="claude")
             tg_request(token, "editMessageText", {"chat_id": chat_id, "message_id": msg_id, "text": ("🛠 Code mode (Claude Code) enabled.\nSend a task and I'll run it in sandbox." if is_en else "🛠 Код-режим (Claude Code) включён.\nОтправь задачу — выполню в песочнице."), "reply_markup": {"inline_keyboard": [[{"text": back_label, "callback_data": "menu:back"}]]}})
             tg_request(token, "answerCallbackQuery", {"callback_query_id": cb["id"], "text": ("Switched to text model" if switched and is_en else ("Переключил на текстовую модель" if switched else "Код"))})

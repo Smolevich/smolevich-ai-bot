@@ -21,6 +21,19 @@ PROBE_STALE_AFTER_SEC = 3600
 # Free tiers answer 429 in bursts; one refusal is not a dead model.
 RETRYABLE_STATUSES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 522, 524})
 
+# Models that answer through the claude CLI, in preference order. Being on the board is
+# not enough: claude-code speaks the Anthropic Messages protocol and needs tool-calling,
+# so a model that answers plain chat completions can still come back with "There's an
+# issue with the selected model". Every id here was run on the server as
+# `acpx --model <id> claude exec "Даров"` on 2026-09-08 and answered; nothing goes in
+# without that run. Ids carry no `[1m]` — that suffix is claude-code's own 1M-context
+# marker, and OpenRouter has no such model.
+CLAUDE_CLI_MODELS: tuple[Candidate, ...] = (
+    ("openrouter", "inclusionai/ling-3.0-flash-sante:free"),
+    ("openrouter", "inclusionai/ling-3.0-flash-fin:free"),
+    ("openrouter", "dots-studio/dots-3-note-preview:free"),
+)
+
 BRAND_NAMES = {
     "minimax": "MiniMax",
     "qwen": "Qwen",
@@ -178,6 +191,46 @@ def fallback_chain(ranked: list[Candidate], current: Candidate | None, limit: in
         if candidate not in chain:
             chain.append(candidate)
     return chain
+
+
+def claude_cli_candidate(
+    live: set[Candidate] | frozenset[Candidate],
+    preferred: Candidate | None = None,
+    whitelist: tuple[Candidate, ...] = CLAUDE_CLI_MODELS,
+) -> Candidate | None:
+    """The pair to run the claude CLI with, or None when the mode has nothing to run on.
+
+    A session pinned to `minimax/minimax-m3:free` sent that id into claude-code, which
+    asked OpenRouter for `minimax/minimax-m3:free[1m]` and handed the error text to the
+    human. Only a verified pair goes in, and only while the health probe still reaches it.
+    """
+    if preferred and preferred in whitelist and preferred in live:
+        return preferred
+    for candidate in whitelist:
+        if candidate in live:
+            return candidate
+    return None
+
+
+def engine_mode_for(
+    stored_mode: str | None,
+    is_admin: bool,
+    claude_model: Candidate | None = None,
+) -> str:
+    """The mode a question is actually answered in — never what the row alone says.
+
+    Sandboxed modes are the admin's own toy, and `claude` additionally needs a model the
+    CLI can talk to. Anything unresolved reads as `native`, because native always has
+    somewhere to fall.
+    """
+    mode = (stored_mode or "native").strip().lower()
+    if mode not in ("claude", "opencode", "pi"):
+        return "native"
+    if not is_admin:
+        return "native"
+    if mode == "claude" and claude_model is None:
+        return "native"
+    return mode
 
 
 def is_retryable(status: int | None) -> bool:

@@ -15,10 +15,18 @@ Full file map: [docs/structure.md](docs/structure.md).
 
 ## Engine modes
 
-- `native` — direct chat completions from LLM providers.
+- `native` — direct chat completions from LLM providers. The default for everyone, including the admin, and what a reset returns to.
 - `claude` — sandboxed agentic execution inside a Podman container (`acpx-claude:latest`, built from `bot/Containerfile.acpx-claude`).
 - `pi` — Private Interpreter (sandboxed Python).
 - `opencode` — sandboxed shell via `bot/opx.sh`.
+
+Rules that produced themselves the hard way (08.09.2026):
+
+- **Every answer goes through `answer_with_fallback`.** It picks the engine, runs the sandbox, and on any failure at all answers natively with the same history. A harness never talks to a person directly.
+- **A CLI's own error text never reaches the chat.** `ask_via_acpx` returns `None` on failure; the reason goes to the log and to `request_log`.
+- **claude mode runs only on a model from `model_routing.CLAUDE_CLI_MODELS`,** and only while the health probe still reaches it. The board ranks models for chat completions; claude-code speaks the Anthropic protocol and cannot talk to most of them.
+- **The model is passed as `--model`, never through `ANTHROPIC_DEFAULT_*_MODEL` alone.** claude-code 2.1.138 resolves a 1M-context model from the env vars to `<id>[1m]`, which no provider has.
+- **The bot's system prompt goes in with `--append-system-prompt`,** or the sandbox answers a greeting with "not a software engineering task".
 
 The bot and the benchmark share a flock at `/var/lock/acpx.lock` so only one acpx container runs at a time.
 
