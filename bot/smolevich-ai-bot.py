@@ -825,12 +825,14 @@ def feature_retry_after_sec(kind, now=None):
     return left if left > 0 else None
 
 
-def format_bytes(size: int) -> str:
+def format_bytes(size: int, is_en: bool = False) -> str:
+    """Размер в тех же единицах, что и на экране «Видео: AI или нет» — «20 МБ»."""
+    b, kb, mb = ("B", "KB", "MB") if is_en else ("Б", "КБ", "МБ")
     if size < 1024:
-        return f"{size} B"
+        return f"{size} {b}"
     if size < 1024 * 1024:
-        return f"{size / 1024:.1f} KB"
-    return f"{size / (1024 * 1024):.1f} MB"
+        return f"{size / 1024:.1f} {kb}"
+    return f"{size / (1024 * 1024):.1f} {mb}"
 
 
 def extract_rate_limit_headers(headers):
@@ -2203,8 +2205,9 @@ def process_update(upd, token, admin_id):
                     return
                 media_size = int(media.get("file_size") or 0)
                 if media_size > TELEGRAM_BOT_FILE_DOWNLOAD_LIMIT_BYTES:
-                    limit = format_bytes(TELEGRAM_BOT_FILE_DOWNLOAD_LIMIT_BYTES)
-                    got = format_bytes(media_size)
+                    is_en = sess_for_media.get("ui_lang", "ru") == "en"
+                    limit = format_bytes(TELEGRAM_BOT_FILE_DOWNLOAD_LIMIT_BYTES, is_en)
+                    got = format_bytes(media_size, is_en)
                     DB.log_media_request(
                         uid,
                         sess_for_media.get("provider", PROVIDER_DEFAULT),
@@ -2217,8 +2220,7 @@ def process_update(upd, token, admin_id):
                         error=f"file_too_big:{media_size}",
                     )
                     tg_send_text(token, uid, media_too_big_or_wrong_format(
-                        "video_size", got=got, limit=limit,
-                        is_en=sess_for_media.get("ui_lang", "ru") == "en"))
+                        "video_size", got=got, limit=limit, is_en=is_en))
                     return
                 file_id = media.get("file_id")
                 from agent.telegram_api import tg_send_chat_action
@@ -2282,8 +2284,9 @@ def process_update(upd, token, admin_id):
                 media = msg.get("voice") or msg.get("audio") or msg.get("document")
                 media_size = int(media.get("file_size") or 0)
                 if media_size > TELEGRAM_BOT_FILE_DOWNLOAD_LIMIT_BYTES:
-                    limit = format_bytes(TELEGRAM_BOT_FILE_DOWNLOAD_LIMIT_BYTES)
-                    got = format_bytes(media_size)
+                    is_en = sess_for_media.get("ui_lang", "ru") == "en"
+                    limit = format_bytes(TELEGRAM_BOT_FILE_DOWNLOAD_LIMIT_BYTES, is_en)
+                    got = format_bytes(media_size, is_en)
                     DB.log_media_request(
                         uid,
                         STT_PROVIDER,
@@ -2296,8 +2299,7 @@ def process_update(upd, token, admin_id):
                         error=f"file_too_big:{media_size}",
                     )
                     tg_send_text(token, uid, media_too_big_or_wrong_format(
-                        "audio_size", got=got, limit=limit,
-                        is_en=sess_for_media.get("ui_lang", "ru") == "en"))
+                        "audio_size", got=got, limit=limit, is_en=is_en))
                     return
                 file_id = media.get("file_id")
                 from agent.telegram_api import tg_send_chat_action

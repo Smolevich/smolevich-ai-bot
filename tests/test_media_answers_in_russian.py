@@ -90,7 +90,7 @@ class WhatTheLimitIs(unittest.TestCase):
 
     def test_an_oversized_video_names_the_ceiling(self):
         said = run({"video": {"file_id": "v", "mime_type": "video/mp4", "file_size": TOO_BIG}}, video_pending=True)
-        self.assertIn(bot.format_bytes(bot.TELEGRAM_BOT_FILE_DOWNLOAD_LIMIT_BYTES), said)
+        self.assertIn("20.0 МБ", said)
 
     def test_an_oversized_video_never_mentions_the_bot_api(self):
         said = run({"video": {"file_id": "v", "mime_type": "video/mp4", "file_size": TOO_BIG}}, video_pending=True)
@@ -98,7 +98,7 @@ class WhatTheLimitIs(unittest.TestCase):
 
     def test_an_oversized_audio_names_the_ceiling(self):
         said = run({"voice": {"file_id": "a", "file_size": TOO_BIG}}, stt_pending=True)
-        self.assertIn(bot.format_bytes(bot.TELEGRAM_BOT_FILE_DOWNLOAD_LIMIT_BYTES), said)
+        self.assertIn("20.0 МБ", said)
 
 
 class NoProviderErrorsInTheChat(unittest.TestCase):
