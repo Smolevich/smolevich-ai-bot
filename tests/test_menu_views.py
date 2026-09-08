@@ -63,9 +63,8 @@ class MenuRoot(unittest.TestCase):
         _, kb = self.build(is_admin=False)
         self.assertIn("menu:curious", labels(kb))
         self.assertNotIn("menu:top", labels(kb))
-        with mock.patch.object(bot, "has_stt_models", return_value=False), \
-             mock.patch.object(bot, "has_tts_models", return_value=False):
-            bottom = bot.build_quick_keyboard(SESSION)
+        with mock.patch.object(bot.DB, "get_session", return_value=dict(SESSION)):
+            bottom = bot.quick_keyboard(7)
         self.assertNotIn(bot.QUICK_BOARD["ru"], [b["text"] for row in bottom["keyboard"] for b in row])
 
     def test_picking_a_model_is_not_on_the_first_screen(self):

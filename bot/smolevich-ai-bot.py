@@ -331,19 +331,16 @@ QUICK_TTS = {"ru": "🔊 Текст → аудио", "en": "🔊 Text → audio"
 QUICK_MORE = {"ru": "☰ Ещё", "en": "☰ More"}
 
 
-def build_quick_keyboard(sess):
-    """Bottom reply keyboard: four buttons at most, everything else lives under ☰.
+def quick_keyboard(uid):
+    """The bottom reply keyboard. One function, one layout, every screen, everybody.
 
-    The measurement used to sit here as "🏆 Кто лучше" — the second thing a person saw
-    was a table asking them to pick a model. Asking is the bot's job now, so the board
-    moved down to ☰ → «Для любопытных» and the bottom row is: ask, transcribe, the rest.
+    Its shape used to depend on whether the transcription probe had answered lately, so
+    the row under the chat appeared and disappeared on its own while nothing the person
+    did had changed. The buttons are fixed now; a feature that is down says so when it is
+    pressed. Admin gets the same three — admin tools live under ☰ → Admin.
     """
-    lang = "en" if sess.get("ui_lang", "ru") == "en" else "ru"
-    kb = [[{"text": QUICK_CHAT[lang]}]]
-    # Four buttons is the cap, so only transcription gets a spot here; voicing lives under ☰.
-    if has_stt_models():
-        kb.append([{"text": QUICK_STT[lang]}])
-    kb.append([{"text": QUICK_MORE[lang]}])
+    lang = "en" if DB.get_session(uid).get("ui_lang", "ru") == "en" else "ru"
+    kb = [[{"text": QUICK_CHAT[lang]}], [{"text": QUICK_STT[lang]}], [{"text": QUICK_MORE[lang]}]]
     return {"keyboard": kb, "resize_keyboard": True, "is_persistent": True}
 
 
@@ -1698,7 +1695,7 @@ def welcome_after_gate(uid, token, admin_id):
         "chat_id": uid,
         "text": ("You're in. Ask me anything — I pick who answers."
                  if is_en else "Готово. Спрашивай что угодно — кто отвечает, я выберу сам."),
-        "reply_markup": build_quick_keyboard(sess),
+        "reply_markup": quick_keyboard(uid),
     })
 
 
@@ -2033,7 +2030,7 @@ def handle_quick_action(action, uid, token, admin_id, message_id=None):
             "chat_id": uid,
             "text": ("Updated the buttons — this now lives under ☰." if is_en
                      else "Обновил кнопки — это теперь под ☰."),
-            "reply_markup": build_quick_keyboard(sess),
+            "reply_markup": quick_keyboard(uid),
         })
         c_txt, c_kb = build_curious_view(sess, is_admin=(uid == admin_id))
         tg_request(token, "sendMessage", {"chat_id": uid, "text": c_txt, "reply_markup": {"inline_keyboard": c_kb}})
@@ -2054,7 +2051,7 @@ def handle_command(uid, username, text, token, admin_id):
         tg_request(token, "sendMessage", {
             "chat_id": uid,
             "text": ("💬 Ask anything — I'll answer." if is_en else "💬 Пиши вопрос — отвечу."),
-            "reply_markup": build_quick_keyboard(sess),
+            "reply_markup": quick_keyboard(uid),
         })
         m_txt, m_kb = build_menu_root(sess, is_admin=(uid == admin_id))
         tg_request(token, "sendMessage", {"chat_id": uid, "text": m_txt, "reply_markup": {"inline_keyboard": m_kb}})

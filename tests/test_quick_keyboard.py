@@ -27,9 +27,11 @@ SESSION_EN = dict(SESSION_RU, ui_lang="en")
 
 
 def keyboard(sess, stt=True, tts=True):
+    """The layout no longer depends on provider health — see test_quick_keyboard_never_changes."""
     with mock.patch.object(bot, "has_stt_models", return_value=stt), \
-         mock.patch.object(bot, "has_tts_models", return_value=tts):
-        return bot.build_quick_keyboard(sess)
+         mock.patch.object(bot, "has_tts_models", return_value=tts), \
+         mock.patch.object(bot.DB, "get_session", return_value=dict(sess)):
+        return bot.quick_keyboard(7)
 
 
 def buttons(kb):
@@ -40,9 +42,9 @@ class QuickKeyboard(unittest.TestCase):
     def test_never_more_than_four_buttons(self):
         self.assertLessEqual(len(buttons(keyboard(SESSION_RU))), 4)
 
-    def test_voice_buttons_hidden_when_unavailable(self):
-        # Ask and ☰ — voicing lives under ☰ so the cap of four always holds.
-        self.assertEqual(len(buttons(keyboard(SESSION_RU, stt=False, tts=False))), 2)
+    def test_the_layout_does_not_shrink_when_a_probe_goes_quiet(self):
+        """It used to. The row under the chat reshuffled itself while nobody touched it."""
+        self.assertEqual(keyboard(SESSION_RU, stt=False, tts=False), keyboard(SESSION_RU))
 
     def test_the_measurement_is_not_the_second_button_a_newcomer_sees(self):
         """A table of models asking "which one?" is not what someone came here for."""
