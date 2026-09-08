@@ -2434,7 +2434,9 @@ def process_update(upd, token, admin_id):
         if mode in ("claude", "opencode", "pi"):
             agent_name = acp_agent_for_mode(mode)
             _p, _m, switched = harness_target(agent_name, provider, model)
-            if switched:
+            # Режимы, провайдеры и имена моделей — служебная записка админу; человек
+            # сюда не попадает, но и второй замок ничего не стоит.
+            if switched and uid == admin_id:
                 tg_send_text(token, uid, f"ℹ️ Режим {agent_name} работает только на {_p} — отвечаю моделью {_m}.")
             ans, usage, meta = ask_via_acpx(uid, text, sess)
         else:
