@@ -59,9 +59,10 @@ class MenuRoot(unittest.TestCase):
             return bot.build_menu_root(SESSION, is_admin=is_admin)
 
     def test_the_measurement_lives_under_one_named_screen(self):
-        """Not on the bottom row, not in Settings — under ☰ → «Для любопытных»."""
+        """Not on the bottom row, not on the first screen — under ☰ → Настройки → «Для любопытных»."""
         _, kb = self.build(is_admin=False)
-        self.assertIn("menu:curious", labels(kb))
+        self.assertNotIn("menu:curious", labels(kb))
+        self.assertIn("menu:curious", labels(bot.build_menu_settings(SESSION)[1]))
         self.assertNotIn("menu:top", labels(kb))
         with mock.patch.object(bot.DB, "get_session", return_value=dict(SESSION)):
             bottom = bot.quick_keyboard(7)

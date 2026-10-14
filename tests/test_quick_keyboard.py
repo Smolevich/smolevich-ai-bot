@@ -60,8 +60,9 @@ class QuickKeyboard(unittest.TestCase):
 
 
 class ChatIsAlwaysReachable(unittest.TestCase):
-    def test_chat_button_is_always_there(self):
-        self.assertIn(bot.QUICK_CHAT["ru"], buttons(keyboard(SESSION_RU, stt=False, tts=False)))
+    def test_the_retired_chat_label_still_opens_chat(self):
+        """«💬 Спросить» left the layout in PP-292 but lives on in old clients."""
+        self.assertEqual(bot.quick_action_for(bot.QUICK_CHAT["ru"]), "chat")
 
     def test_chat_leaves_the_voice_mode(self):
         with bot.pendingTtsUsersLock:
