@@ -1,0 +1,10 @@
+[Unit]
+Description=smolevich-ai-bot model benchmark at 07:00 and 19:00 UTC
+
+[Timer]
+OnCalendar=*-*-* 07,19:00:00 UTC
+Persistent=false
+Unit=smolevich-bench.service
+
+[Install]
+WantedBy=timers.target

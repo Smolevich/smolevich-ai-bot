@@ -1,16 +1,11 @@
 # Provider probes. Deployed by CI to /etc/cron.d/model-checks.
 # flock prevents overlapping runs; timeout kills a stuck job before the next one starts.
 #
-# The benchmark is NOT here: it runs on a Temporal schedule (smolevich-bench-2x-daily,
-# 07:00/19:00 UTC) executed by smolevich-bench-worker.service. A cron drain stood behind it
-# from 14 to 17 August and never picked up a single job across six clean runs, so it is gone.
-# To fall back to cron, restore:
-#   0 7,19 * * * root flock -n /var/lock/mbench.lock timeout 1800 \
-#     /bin/sh -c '... model-benchmark run --max-jobs 200 ...'
-# and pause the schedule, or both will enqueue the same batch.
+# The benchmark is NOT here: it runs from smolevich-bench.timer (07:00/19:00 UTC).
+# The Temporal worker and schedule were retired before the Temporal Cloud trial ended (PP-292).
 #
 # The probes stay on cron on purpose: seconds of work every ten minutes, nothing to make
-# durable, and moving them would add ~1500 Temporal actions a day for no gain.
+# durable, and moving them to a timer would buy nothing.
 SHELL=/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 

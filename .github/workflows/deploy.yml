@@ -51,7 +51,7 @@ jobs:
           username: ${{ secrets.VDS_USER }}
           key: ${{ secrets.VDS_SSH_KEY }}
           passphrase: ${{ secrets.VDS_SSH_PASSPHRASE }}
-          source: bot/smolevich-ai-bot.py,bot/migrate.py,bot/model-health-check.py,bot/model-audio-check.py,bot/model-media-check.py,bot/model-benchmark.py,bot/benchmark-tasks.json,bot/benchmark-tasks.md,bot/benchmark-datasets,bot/scripts,bot/smolevich-ai-bot.service,bot/migrations,bot/agent,bot/Containerfile.acpx-claude,bot/cron.d,bot/logrotate.d,bot/temporal_jobs,bot/smolevich-bench-worker.service
+          source: bot/smolevich-ai-bot.py,bot/migrate.py,bot/model-health-check.py,bot/model-audio-check.py,bot/model-media-check.py,bot/model-benchmark.py,bot/benchmark-tasks.json,bot/benchmark-tasks.md,bot/benchmark-datasets,bot/scripts,bot/smolevich-ai-bot.service,bot/migrations,bot/agent,bot/Containerfile.acpx-claude,bot/cron.d,bot/logrotate.d,bot/temporal_jobs,bot/smolevich-bench-worker.service,bot/smolevich-bench.service,bot/smolevich-bench.timer
           target: /tmp/deploy-bot
           strip_components: 1
 
@@ -99,6 +99,8 @@ jobs:
             sudo cp -r /tmp/deploy-bot/temporal_jobs "$APP_DIR/worker/temporal_jobs"
             sudo cp /tmp/deploy-bot/temporal_jobs/pyproject.toml /tmp/deploy-bot/temporal_jobs/uv.lock "$APP_DIR/worker/"
             sudo install -m 0644 /tmp/deploy-bot/smolevich-bench-worker.service /etc/systemd/system/smolevich-bench-worker.service
+            sudo install -m 0644 /tmp/deploy-bot/smolevich-bench.service /etc/systemd/system/smolevich-bench.service
+            sudo install -m 0644 /tmp/deploy-bot/smolevich-bench.timer   /etc/systemd/system/smolevich-bench.timer
 
             # Rebuild the sandbox image only when Containerfile actually changed.
             CF=/usr/local/bin/Containerfile.acpx-claude
@@ -169,8 +171,8 @@ jobs:
               sudo rm -f "$DEGRADED_MARK"
             fi
 
-            # Centralized .env — all secrets from Vault. Used by smolevich-ai-bot (systemd) and the
-            # benchmark cron (which sources this file).
+            # Centralized .env — all secrets from Vault. Used by smolevich-ai-bot and
+            # smolevich-bench.service (both via EnvironmentFile).
             sudo install -m 0600 /dev/null "$APP_DIR/.env"
             cat << EOF | sudo tee "$APP_DIR/.env" > /dev/null
             BOT_PROXY_URL=$V_PROXY
@@ -216,20 +218,16 @@ jobs:
               echo '0 3 * * * root find /var/lib/smolevich-ai-bot/sessions -mindepth 1 -maxdepth 1 -type d -mtime +14 -exec rm -rf {} +' | sudo tee /etc/cron.d/smolevich-ai-bot-sessions-cleanup >/dev/null
             fi
 
-            # Benchmark worker: temporalio lives in its own venv, the bot stays stdlib-only.
-            # Runs after .env is written — it reads TEMPORAL_* from there.
+            # Benchmark runs from a systemd timer. The Temporal worker stays off and its schedule
+            # is deleted on every deploy: after the Temporal Cloud trial each action is billed (PP-292).
+            sudo systemctl disable --now smolevich-bench-worker 2>/dev/null || true
             if [ -n "$V_TEMPORAL_ADDR" ] && [ -n "$V_TEMPORAL_KEY" ]; then
-              (cd "$APP_DIR/worker" && sudo /usr/local/bin/uv sync --frozen --no-dev)
-              sudo systemctl daemon-reload
-              sudo systemctl enable smolevich-bench-worker
-              sudo systemctl restart smolevich-bench-worker
-              # Idempotent: recreates the 07:00/19:00 schedule so it survives a rebuild.
-              (cd "$APP_DIR/worker" && set -a && . "$APP_DIR/.env" && set +a \
-                && sudo -E ./.venv/bin/python -m temporal_jobs.schedule) || echo "WARN: schedule setup failed"
-            else
-              echo "TEMPORAL_* отсутствуют — воркер бенчмарка выключен, работает cron"
-              sudo systemctl disable --now smolevich-bench-worker 2>/dev/null || true
+              (cd "$APP_DIR/worker" && sudo /usr/local/bin/uv sync --frozen --no-dev \
+                && set -a && . "$APP_DIR/.env" && set +a \
+                && sudo -E ./.venv/bin/python -m temporal_jobs.schedule --delete) || echo "WARN: schedule delete failed"
             fi
+            sudo systemctl daemon-reload
+            sudo systemctl enable --now smolevich-bench.timer
 
             sudo systemctl daemon-reload
             sudo yoyo break-lock --database "sqlite:////var/lib/telegram-llm-bot.db?timeout=60" || true
