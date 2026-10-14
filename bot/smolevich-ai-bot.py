@@ -355,10 +355,14 @@ def quick_keyboard(uid):
     Its shape used to depend on whether the transcription probe had answered lately, so
     the row under the chat appeared and disappeared on its own while nothing the person
     did had changed. The buttons are fixed now; a feature that is down says so when it is
-    pressed. Admin gets the same three — admin tools live under ☰ → Admin.
+    pressed.
+
+    One button: the whole point is "write a question, get an answer", and «💬 Спросить»
+    and «🎙 Аудио → текст» only told a newcomer what a plain message or voice note does
+    anyway (PP-292). Everything else, admin tools included, lives under ☰.
     """
     lang = "en" if DB.get_session(uid).get("ui_lang", "ru") == "en" else "ru"
-    kb = [[{"text": QUICK_CHAT[lang]}], [{"text": QUICK_STT[lang]}], [{"text": QUICK_MORE[lang]}]]
+    kb = [[{"text": QUICK_MORE[lang]}]]
     return {"keyboard": kb, "resize_keyboard": True, "is_persistent": True}
 
 
@@ -385,18 +389,19 @@ def build_menu_root(sess, is_admin=False):
     ui_lang = sess.get("ui_lang", "ru")
     is_en = ui_lang == "en"
     kb = []
+    if has_stt_models():
+        kb.append([{"text": QUICK_STT["en" if is_en else "ru"], "callback_data": "menu:stt"}])
     if has_tts_models():
         kb.append([{"text": ("🔊 Text → audio" if is_en else "🔊 Текст → аудио"), "callback_data": "menu:tts"}])
     if has_video_detector():
         kb.append([{"text": ("🕵️ Is the video AI-made?" if is_en else "🕵️ Видео: AI или нет"), "callback_data": "menu:video"}])
-    kb.append([{"text": ("🔬 For the curious" if is_en else "🔬 Для любопытных"), "callback_data": "menu:curious"}])
     kb.append([{"text": ("⚙️ Settings" if is_en else "⚙️ Настройки"), "callback_data": "menu:settings"}])
     if is_admin:
         kb.append([{"text": "🛠 Admin", "callback_data": "menu:admin"}])
     return ("Everything else" if is_en else "Остальные возможности"), kb
 
 def build_menu_settings(sess, is_admin=False):
-    """Сабменю настроек. Модель и провайдер сюда не входят — они под «Для любопытных»."""
+    """Сабменю настроек. «Для любопытных» живёт здесь: новому человеку оно не нужно (PP-292)."""
     is_en = sess.get("ui_lang", "ru") == "en"
     ui_lang = sess.get("ui_lang", "ru")
     lang_label = "RU" if ui_lang == "ru" else "EN"
@@ -404,6 +409,7 @@ def build_menu_settings(sess, is_admin=False):
         [{"text": (f"🌐 Language: {lang_label}" if is_en else f"🌐 Язык: {lang_label}"), "callback_data": "menu:lang_toggle"}],
     ]
     kb += [
+        [{"text": ("🔬 For the curious" if is_en else "🔬 Для любопытных"), "callback_data": "menu:curious"}],
         [{"text": ("🔄 Reset history" if is_en else "🔄 Сброс истории"), "callback_data": "menu:reset"}],
         [{"text": ("❓ Help" if is_en else "❓ Помощь"), "callback_data": "menu:help"}],
         [{"text": ("← Back" if is_en else "← Назад"), "callback_data": "menu:back"}],
@@ -2205,7 +2211,7 @@ def build_curious_view(sess, is_admin=False):
     пятёрка уже отсортирована. Админу список нужен и остаётся.
     """
     is_en = sess.get("ui_lang", "ru") == "en"
-    back = [{"text": ("← Back" if is_en else "← Назад"), "callback_data": "menu:back"}]
+    back = [{"text": ("← Back" if is_en else "← Назад"), "callback_data": "menu:settings"}]
     manual = [{"text": ("🤖 Choose by hand" if is_en else "🤖 Выбрать вручную"), "callback_data": "menu:model"}]
     tail = ([manual, back] if is_admin else [back])
     ranked = live_model_ranking()[:CURIOUS_ROWS]
