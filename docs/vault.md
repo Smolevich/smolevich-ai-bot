@@ -10,10 +10,17 @@ Runtime secrets live in HashiCorp Vault, **KV v2**, as a single secret at
 | `NVIDIA_API_KEY` | `.env` + `.nvidia_key` | bot, probes, benchmark |
 | `MODEL_LEADERBOARD_TOKEN` | `.env` | benchmark `--publish` |
 | `PROXY_URL` | `.env` `BOT_PROXY_URL` | bot, probes |
+| `WEBHOOK_SECRET` | `.env` `BOT_WEBHOOK_SECRET` | bot (webhook auth) |
+| `TELEGRAM_BOT_TOKEN` | `/etc/socks-monitor/.bot_token` | bot, health probe admin note |
 
 `load_provider_key` reads the env var first, then the on-disk `key_file` as fallback — the deploy
 writes both so the systemd bot, the benchmark cron (sources `.env`) and the health/audio/media cron
 probes (read the key files directly) all stay in sync.
+
+## Rotating the bot token
+
+BotFather `/revoke` → `vault kv patch secret/smolevich-ai-bot TELEGRAM_BOT_TOKEN=-` (value on stdin) →
+run the deploy workflow. The bot re-registers its webhook with the secret on start.
 
 ## How the deploy reads Vault
 

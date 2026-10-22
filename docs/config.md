@@ -46,6 +46,7 @@ When sourcing these in shell or cron scripts, use `set -a` before and `set +a` a
 | `BOT_DB_FILE` | Bot SQLite database file | `/var/lib/telegram-llm-bot.db` |
 | `BOT_SESSIONS_ROOT` | Podman agent workspace directory | `/var/lib/smolevich-ai-bot/sessions` |
 | `BOT_TUNNEL_URL` | Public webhook URL | `https://ai.smolevich.com` |
+| `BOT_WEBHOOK_SECRET` | `secret_token` for setWebhook; Telegram echoes it in `X-Telegram-Bot-Api-Secret-Token`. Required — the bot refuses to start without it. Webhook path is `/telegram/webhook`; the bot token never goes into the URL | Vault `WEBHOOK_SECRET` |
 | `BOT_REQUIRED_CHANNEL` | Required channel for subscription gate | `@naturalists_notes_st` |
 | `BOT_PROXY_URL` | Outbound HTTP/SOCKS proxy URL | `""` |
 | `BOT_PROXY_DISABLED` | Global proxy override (non-empty value disables) | `""` |
