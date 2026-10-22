@@ -38,7 +38,8 @@ The bot and the benchmark share a flock at `/var/lock/acpx.lock` so only one acp
 - Shared SQLite DB: `/var/lib/telegram-llm-bot.db` (tables: `model_health`, `model_health_log`, `model_benchmark_jobs`, `model_benchmark_results`, plus bot state).
 - Per-session workspaces: `/var/lib/smolevich-ai-bot/sessions`.
 - Env: `/opt/smolevich-ai-bot/.env` (CI-assembled from Vault) + `/etc/socks-monitor/smolevich-ai-bot.env`. Provider keys: `/etc/socks-monitor/.<provider>_key`.
-- Secrets live in Vault at `secret/smolevich-ai-bot`; deploy reads them via `VAULT_DEPLOY_TOKEN`. See [docs/vault.md](docs/vault.md).
+- Webhook: `ai.smolevich.com/telegram/webhook`, authenticated by `X-Telegram-Bot-Api-Secret-Token` (`BOT_WEBHOOK_SECRET`). The bot token never goes into a URL path — it used to, and leaked into Cloudflare analytics.
+- Secrets live in Vault at `secret/smolevich-ai-bot` (bot token included, field `TELEGRAM_BOT_TOKEN`); deploy reads them via `VAULT_DEPLOY_TOKEN`. See [docs/vault.md](docs/vault.md).
 
 Paths, env vars and the binary mapping: [docs/config.md](docs/config.md).
 

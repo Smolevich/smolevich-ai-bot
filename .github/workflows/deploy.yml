@@ -146,11 +146,12 @@ jobs:
             V_NVIDIA=$(vv NVIDIA_API_KEY NVIDIA_API_KEY)
             V_LEADERBOARD=$(vv MODEL_LEADERBOARD_TOKEN MODEL_LEADERBOARD_TOKEN)
             V_PROXY=$(vv BOT_PROXY_URL PROXY_URL)
+            V_WEBHOOK_SECRET=$(vv BOT_WEBHOOK_SECRET WEBHOOK_SECRET)
             # Optional: the benchmark worker stays off until these exist in Vault.
             V_TEMPORAL_ADDR=$(vv TEMPORAL_ADDRESS TEMPORAL_ADDRESS || true)
             V_TEMPORAL_NS=$(vv TEMPORAL_NAMESPACE TEMPORAL_NAMESPACE || true)
             V_TEMPORAL_KEY=$(vv TEMPORAL_API_KEY TEMPORAL_API_KEY || true)
-            for v in V_OPENROUTER V_GROQ V_NVIDIA V_LEADERBOARD; do
+            for v in V_OPENROUTER V_GROQ V_NVIDIA V_LEADERBOARD V_WEBHOOK_SECRET; do
               if [ -z "${!v}" ]; then echo "ERROR: $v пуст и в Vault, и в .env" >&2; exit 1; fi
             done
 
@@ -175,6 +176,7 @@ jobs:
             cat << EOF | sudo tee "$APP_DIR/.env" > /dev/null
             BOT_PROXY_URL=$V_PROXY
             BOT_PROXY_DISABLED=$BOT_PROXY_DISABLED
+            BOT_WEBHOOK_SECRET=$V_WEBHOOK_SECRET
             OPENROUTER_API_KEY=$V_OPENROUTER
             GROQ_API_KEY=$V_GROQ
             NVIDIA_API_KEY=$V_NVIDIA
@@ -200,6 +202,18 @@ jobs:
               printf '%s' "$val" | sudo tee /etc/socks-monitor/.${name}_key >/dev/null
             done
             sudo rm -f /etc/socks-monitor/.hf_key /etc/socks-monitor/.cerebras_key
+
+            # Bot token: the bot and the health probe's admin note read it from this file.
+            # Vault is the source so a BotFather /revoke is one patch + redeploy; a failed
+            # read keeps the file already there instead of blanking the bot.
+            V_TG_TOKEN=$(vault kv get -field=TELEGRAM_BOT_TOKEN secret/smolevich-ai-bot 2>/dev/null || true)
+            if [ -n "$V_TG_TOKEN" ]; then
+              sudo install -m 0600 /dev/null /etc/socks-monitor/.bot_token
+              printf '%s' "$V_TG_TOKEN" | sudo tee /etc/socks-monitor/.bot_token >/dev/null
+            else
+              echo "::warning::TELEGRAM_BOT_TOKEN не прочитан из Vault — остаётся прежний /etc/socks-monitor/.bot_token"
+            fi
+            unset V_TG_TOKEN
 
             # One-time migration off the legacy vds-agent naming; no-op once renamed.
             if [ -f /etc/systemd/system/vds-agent.service ]; then

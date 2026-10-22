@@ -45,6 +45,7 @@ from agent.entities import normalize_list_markers, parse_markdown_to_entities
 from agent.provider_api import available_providers, load_provider_key, make_opener
 from agent.telegram_api import tg_get_file_bytes, tg_request, tg_send_document_bytes, tg_send_long_text, tg_send_text, multipart_body
 from agent.db import DB
+from agent.webhook import SECRET_ENV, SECRET_HEADER, load_webhook_secret, webhook_status, webhook_url
 
 # Version stamp — CI replaces this placeholder before deploy; manual deploys keep "dev".
 # Format: YYYY-MM-DD-<short_sha>
@@ -2756,22 +2757,32 @@ def process_update(upd, token, admin_id):
 class WebhookHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
+            status = webhook_status(self.path, self.headers.get(SECRET_HEADER), load_webhook_secret())
+            if status != 200:
+                # Not the path itself: the retired path carried the bot token.
+                log.warning(f"Webhook rejected: HTTP {status}, path length {len(self.path)}")
+                self.send_response(status); self.end_headers(); return
             t = load_bot_token(); a = load_admin(); l = int(self.headers.get("Content-Length", 0))
-            if self.path.strip("/") != t:
-                log.warning(f"Invalid path: {self.path}")
-                self.send_response(403); self.end_headers(); return
             body = self.rfile.read(l).decode(); self.send_response(200); self.end_headers(); self.wfile.write(b"ok")
             executorPool.submit(process_update, json.loads(body), t, a)
         except Exception as e: log.error(f"Webhook error: {e}")
     def log_message(self, *args): pass
 
+def register_webhook(token: str, secret: str) -> dict:
+    return tg_request(token, "setWebhook", {"url": webhook_url(TUNNEL_URL), "secret_token": secret}, log=log)
+
 if __name__ == "__main__":
     t = load_bot_token()
-    if t:
-        DB.ensure_schema()
-        avail = available_providers()
-        log.info(f"smolevich-ai-bot starting on port 8080. Providers: {avail}. Webhook: {TUNNEL_URL}/{t[:5]}...")
-        set_bot_commands(t)
-        urllib.request.urlopen(urllib.request.Request(f"https://api.telegram.org/bot{t}/setWebhook", f"--B\r\nContent-Disposition: form-data; name=\"url\"\r\n\r\n{TUNNEL_URL}/{t}\r\n--B--\r\n".encode(), {"Content-Type": "multipart/form-data; boundary=B"}))
-        ThreadingHTTPServer(("127.0.0.1", 8080), WebhookHandler).serve_forever()
-    else: log.error("No token!")
+    secret = load_webhook_secret()
+    if not t:
+        log.error("No token!"); sys.exit(1)
+    if not secret:
+        log.error(f"No {SECRET_ENV}: refusing to start a webhook anyone could post to"); sys.exit(1)
+    DB.ensure_schema()
+    avail = available_providers()
+    log.info(f"smolevich-ai-bot starting on port 8080. Providers: {avail}. Webhook: {webhook_url(TUNNEL_URL)}")
+    set_bot_commands(t)
+    res = register_webhook(t, secret)
+    if not res.get("ok"):
+        log.error(f"setWebhook failed: {res.get('description', '')[:200]}")
+    ThreadingHTTPServer(("127.0.0.1", 8080), WebhookHandler).serve_forever()
