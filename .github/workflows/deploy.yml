@@ -60,14 +60,13 @@ jobs:
         env:
           BOT_PROXY_DISABLED: ${{ secrets.BOT_PROXY_DISABLED }}
           BOT_BENCHMARK_DISABLED: ${{ secrets.BOT_BENCHMARK_DISABLED }}
-          VAULT_DEPLOY_TOKEN: ${{ secrets.VAULT_DEPLOY_TOKEN }}
         with:
           host: ${{ secrets.VDS_HOST }}
           port: ${{ secrets.VDS_PORT }}
           username: ${{ secrets.VDS_USER }}
           key: ${{ secrets.VDS_SSH_KEY }}
           passphrase: ${{ secrets.VDS_SSH_PASSPHRASE }}
-          envs: BOT_PROXY_DISABLED,BOT_BENCHMARK_DISABLED,VAULT_DEPLOY_TOKEN
+          envs: BOT_PROXY_DISABLED,BOT_BENCHMARK_DISABLED
           script: |
             set -e
             APP_DIR=/opt/smolevich-ai-bot
@@ -118,18 +117,30 @@ jobs:
             # Pull all runtime secrets from Vault (mirror voice-ai). Single rotation point:
             # update a field in Vault (secret/smolevich-ai-bot) + redeploy, no gh-secret edit.
             # Vault listens localhost-only on the server, so this runs from the SSH session.
+            # Вход — AppRole smolevich-ai-bot-deploy: role_id и secret_id файлами у root
+            # (infra, vault_field_files), не секретом репо — envs: ssh-action видны в
+            # /proc/<pid>/cmdline. Тело логина через stdin, токен 15 минут, отзывается
+            # в конце шага (trap).
             export VAULT_ADDR=http://127.0.0.1:8200
-            if [ -z "$VAULT_DEPLOY_TOKEN" ]; then echo "ERROR: VAULT_DEPLOY_TOKEN not set" >&2; exit 1; fi
-            export VAULT_TOKEN="$VAULT_DEPLOY_TOKEN"
-            # Periodic token: renew on every deploy so it never expires as long as we
-            # ship within its period (~32d). Without this the token silently died after
-            # three weeks without a deploy and the next one failed with "invalid token".
-            # Non-fatal — a non-renewable token still works until its TTL runs out.
+            ROLE_ID_FILE=/root/.config/smolevich-ai-bot/vault-role-id
+            SECRET_ID_FILE=/root/.config/smolevich-ai-bot/vault-secret-id
+            if [ ! -r "$ROLE_ID_FILE" ] || [ ! -r "$SECRET_ID_FILE" ]; then
+              echo "ERROR: нет файлов AppRole $ROLE_ID_FILE и $SECRET_ID_FILE (их кладёт infra)" >&2
+              exit 1
+            fi
             # Флаг — ФАЙЛОМ, а не переменной: vv() зовётся внутри $( ), то есть в
             # подоболочке, и присваивание до родителя не доезжает.
             DEGRADED_FLAG=$(mktemp -u)
-            vault token renew >/dev/null 2>&1 \
-              || { echo "WARN: vault token renew failed"; : > "$DEGRADED_FLAG"; }
+            VAULT_TOKEN=$(jq -n --rawfile r "$ROLE_ID_FILE" --rawfile s "$SECRET_ID_FILE" \
+                '{role_id: ($r | rtrimstr("\n")), secret_id: ($s | rtrimstr("\n"))}' \
+              | VAULT_TOKEN= vault write -field=token auth/approle/login - 2>/dev/null || true)
+            export VAULT_TOKEN
+            if [ -n "$VAULT_TOKEN" ]; then
+              trap 'vault token revoke -self >/dev/null 2>&1 || echo "::warning::vault token revoke -self не прошёл — токен AppRole истечёт сам через 15 минут"' EXIT
+            else
+              echo "::warning::вход AppRole не прошёл — Vault недоступен или role_id/secret_id неверны"
+              : > "$DEGRADED_FLAG"
+            fi
 
             # Провал чтения = берём значение из уже лежащего .env, а не роняем
             # деплой: секреты на сервере рабочие, ронять выкатку кода незачем.
