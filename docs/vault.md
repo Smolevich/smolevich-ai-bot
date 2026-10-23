@@ -25,9 +25,12 @@ run the deploy workflow. The bot re-registers its webhook with the secret on sta
 ## How the deploy reads Vault
 
 `.github/workflows/deploy.yml` runs `vault kv get -field=<FIELD> secret/smolevich-ai-bot` from inside
-the SSH session on the server (Vault listens **localhost-only**), authenticating with the
-`VAULT_DEPLOY_TOKEN` GitHub secret. That token is scoped to the read-only `smolevich-ai-bot-read`
-policy. The deploy fails fast (`exit 1`) if the token is missing or any required field is empty.
+the SSH session on the server (Vault listens **localhost-only**), logging in via AppRole
+`smolevich-ai-bot-deploy` (read-only `secret/smolevich-ai-bot`, token TTL 15m, bound to
+`127.0.0.1/32`). `role_id` and `secret_id` are files owned by root in `/root/.config/smolevich-ai-bot/`
+(laid out by infra, `vault_field_files`); the login body goes through stdin and the token is revoked
+at the end of the step. Missing files → `exit 1`; failed login → values from the existing `.env`
+with a warning (the 7-day degraded counter applies).
 
 ## How to authenticate manually (headless)
 
@@ -51,20 +54,10 @@ VAULT_TOKEN=$TOK vault kv patch secret/smolevich-ai-bot HF_TOKEN=<value>
 After rotating in Vault, redeploy (push to `main` touching `bot/**` or run the workflow manually) so
 the server `.env` and key files pick up the new value.
 
-## Rotating the CI deploy token
+## Rotating the AppRole secret_id
 
-`VAULT_DEPLOY_TOKEN` is a periodic (1y) orphan token under the `smolevich-ai-bot-read` policy. To
-re-mint:
-
-```bash
-ssh hetzner-bot
-export VAULT_ADDR=http://127.0.0.1:8200
-TOK=$(vault login -method=userpass -token-only -no-store username=smolevich90 password='<PW>')
-VAULT_TOKEN=$TOK vault token create -policy=smolevich-ai-bot-read -period=8760h -orphan \
-  -display-name=smolevich-deploy -field=token
-```
-
-Then `gh secret set VAULT_DEPLOY_TOKEN` in this repo with the printed value.
+From the infra repo: `ROTATE=yes bin/vault-approle.sh smolevich-ai-bot-deploy`, then the pyinfra run
+(`fleet/pyinfra/run.sh bot_servers hetzner-bot`) lays the new `secret_id` file out on the server.
 
 ## Dead ends — do not waste time
 
